@@ -2130,8 +2130,14 @@ static HANDLE X11DRV_CLIPBOARD_ExportTextHtml(Display *display, Window requestor
         return 0;
     }
 
+    /* CROSSOVER HACK: Bug 6613.
+     * Export all of the HTML instead of just the fragment. This ensures that
+     * any classes/styles defined outside the fragment are in the text/html
+     * export. Ideally, we should parse the HTML to find them and ensure that
+     * they are included but that "real" elements outside the fragment are not. */
+
     /* read the important fields */
-    field_value = get_html_description_field(data, "StartFragment:");
+    field_value = get_html_description_field(data, "StartHTML:");
     if (!field_value)
     {
         ERR("Couldn't find StartFragment value\n");
@@ -2139,7 +2145,7 @@ static HANDLE X11DRV_CLIPBOARD_ExportTextHtml(Display *display, Window requestor
     }
     fragmentstart = atoi(field_value);
 
-    field_value = get_html_description_field(data, "EndFragment:");
+    field_value = get_html_description_field(data, "EndHTML:");
     if (!field_value)
     {
         ERR("Couldn't find EndFragment value\n");
@@ -2304,6 +2310,54 @@ static BOOL X11DRV_CLIPBOARD_QueryTargets(Display *display, Window w, Atom selec
     return TRUE;
 }
 
+/* CROSSOVER HACK: bug 5027 - OLE clipboard doesn't work across servers */
+static int is_local_format( LPWINE_CLIPFORMAT lpFormat )
+{
+    static const WCHAR DataObject[] = {'D','a','t','a','O','b','j','e','c','t',0};
+    static const WCHAR WineMarshalledDataObject[] = {'W','i','n','e',' ','M','a','r','s','h','a','l','l','e','d',' ','D','a','t','a','O','b','j','e','c','t',0};
+    static const WCHAR HTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
+    static const WCHAR OlePrivateData[] = {'O','l','e',' ','P','r','i','v','a','t','e',' ','D','a','t','a',0};
+    static const WCHAR EmbedSource[] = {'E','m','b','e','d',' ','S','o','u','r','c','e',0};
+    static const WCHAR EmbeddedObject[] = {'E','m','b','e','d','d','e','d',' ','O','b','j','e','c','t',0};
+    static const WCHAR LinkSource[] = {'L','i','n','k',' ','S','o','u','r','c','e',0};
+    static const WCHAR CustomLinkSource[] = {'C','u','s','t','o','m',' ','L','i','n','k',' ','S','o','u','r','c','e',0};
+    static const WCHAR ObjectDescriptor[] = {'O','b','j','e','c','t',' ','D','e','s','c','r','i','p','t','o','r',0};
+    static const WCHAR LinkSourceDescriptor[] = {'L','i','n','k',' ','S','o','u','r','c','e',' ','D','e','s','c','r','i','p','t','o','r',0};
+    static const WCHAR OwnerLink[] = {'O','w','n','e','r','L','i','n','k',0};
+    static const WCHAR FileName[] = {'F','i','l','e','N','a','m','e',0};
+    static const WCHAR OfficeArt[] = {'+','O','f','f','i','c','e',' ','A','r','t',0};
+    static const WCHAR* local_formats[] = {
+        DataObject,
+        WineMarshalledDataObject,
+        HTMLFormat,
+        OlePrivateData,
+        EmbedSource,
+        EmbeddedObject,
+        LinkSource,
+        CustomLinkSource,
+        ObjectDescriptor,
+        LinkSourceDescriptor,
+        OwnerLink,
+        FileName,
+        NULL};
+    int i;
+    WCHAR buffer[256];
+
+    GetClipboardFormatNameW( lpFormat->wFormatID, buffer, 256 );
+    for (i=0; local_formats[i]; i++)
+        if (lstrcmpW(buffer, local_formats[i]) == 0)
+            return TRUE;
+
+    for (i=0; buffer[i]; i++)
+        if (buffer[i] == '+')
+        {
+            if (lstrcmpW(&buffer[i], OfficeArt) == 0)
+                return TRUE;
+            break;
+        }
+
+    return FALSE;
+}
 
 static int is_atom_error( Display *display, XErrorEvent *event, void *arg )
 {
@@ -2319,6 +2373,12 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
 {
      UINT i, nb_atoms = 0;
      Atom *atoms = NULL;
+     /* CROSSOVER HACK: bug 5027 - OLE clipboard doesn't work across servers */
+     CLIPBOARDINFO cbi;
+     BOOL in_server;
+
+     in_server = X11DRV_CLIPBOARD_GetClipboardInfo(&cbi) &&
+                 cbi.hWndOwner != 0;
 
      /* Cache these formats in the clipboard cache */
      for (i = 0; i < count; i++)
@@ -2327,6 +2387,13 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
 
          if (lpFormat)
          {
+             /* CROSSOVER HACK: bug 5027 - OLE clipboard doesn't work across servers */
+             if (!in_server && is_local_format(lpFormat))
+             {
+                 TRACE("ignoring %s format\n", debugstr_format(lpFormat->wFormatID));
+                 continue;
+             }
+
              /* We found at least one Window's format that mapps to the property.
               * Continue looking for more.
               *
@@ -2376,6 +2443,12 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
                  if (!lpFormat)
                  {
                      ERR("Failed to register %s property. Type will not be cached.\n", names[i]);
+                     continue;
+                 }
+                 /* CROSSOVER HACK: bug 5027 - OLE clipboard doesn't work across servers */
+                 if (!in_server && is_local_format(lpFormat))
+                 {
+                     TRACE("ignoring %s format\n", debugstr_format(lpFormat->wFormatID));
                      continue;
                  }
                  TRACE("Atom#%d Property(%d): --> Format %s\n",

@@ -383,6 +383,10 @@ extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
 extern int xrender_error_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
+extern int forcealtrelease DECLSPEC_HIDDEN;
+
+/* CrossOver Hack 11692: Unique device names from GetMonitorInfo */
+extern int unique_monitor_names DECLSPEC_HIDDEN;
 
 /* atoms */
 
@@ -484,6 +488,8 @@ enum x11drv_atoms
     XATOM_text_rtf,
     XATOM_text_richtext,
     XATOM_text_uri_list,
+    XATOM__CX_WORKAREA, /* CodeWeavers Hack bug 5752 */
+    XATOM__CX_APPLEWM_TAG, /* CodeWeavers Hack bug 9517 */
     NB_XATOMS
 };
 

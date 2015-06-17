@@ -363,9 +363,6 @@ static BOOL grab_clipping_window( const RECT *clip )
     HWND msg_hwnd = 0;
     POINT pos;
 
-    if (GetWindowThreadProcessId( GetDesktopWindow(), NULL ) == GetCurrentThreadId())
-        return TRUE;  /* don't clip in the desktop process */
-
     if (!data) return FALSE;
     if (!(clip_window = init_clip_window())) return TRUE;
 
@@ -1386,6 +1383,9 @@ BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
     RECT virtual_rect = get_virtual_screen_rect();
 
     if (!clip) clip = &virtual_rect;
+
+    if (GetWindowThreadProcessId( GetDesktopWindow(), NULL ) == GetCurrentThreadId())
+        return TRUE;  /* don't clip in the desktop process */
 
     if (grab_pointer)
     {

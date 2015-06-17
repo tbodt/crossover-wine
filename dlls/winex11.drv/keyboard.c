@@ -60,6 +60,10 @@
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
 
+#ifdef __APPLE__
+extern int ProcessMacInput(XKeyEvent*);
+#endif
+
 static int min_keycode, max_keycode, keysyms_per_keycode;
 static KeySym *key_mapping;
 static WORD keyc2vkey[256], keyc2scan[256];
@@ -1372,6 +1376,11 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     else
         ascii_chars = XLookupString(event, buf, sizeof(buf), &keysym, NULL);
 
+#ifdef __APPLE__
+	if (ProcessMacInput(event))
+		return;
+#endif
+
     TRACE_(key)("nbyte = %d, status %d\n", ascii_chars, status);
 
     if (status == XLookupChars)
@@ -2533,6 +2542,10 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
     if ((virtKey>=VK_NUMPAD0) && (virtKey<=VK_NUMPAD9))
         e.keycode = XKeysymToKeycode(e.display, virtKey-VK_NUMPAD0+XK_KP_0);
 
+    /* don't apply the numlock state to the non-keypad arrows */
+    if ((virtKey>=VK_PRIOR) && (virtKey<=VK_HELP) && (scanCode & KF_EXTENDED))
+        e.state &= ~NumLockMask;
+
     /* Windows always generates VK_DECIMAL for Del/. on keypad while some
      * X11 keyboard layouts generate XK_KP_Separator instead of XK_KP_Decimal
      * in order to produce a locale dependent numeric separator.
@@ -2728,5 +2741,12 @@ found:
  */
 void CDECL X11DRV_Beep(void)
 {
+    char *p = getenv("CX_BEEPMSG");
+
+    if (p)
+    {
+        system(p);
+        return;
+    }
     XBell(gdi_display, 0);
 }

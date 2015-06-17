@@ -54,6 +54,9 @@
 @ cdecl WindowPosChanged(long long long ptr ptr ptr ptr ptr) X11DRV_WindowPosChanged
 @ cdecl SystemParametersInfo(long long ptr long) X11DRV_SystemParametersInfo
 
+# Adopted X windows
+@ cdecl wine_x11_adopt_window(long long)
+
 # WinTab32
 @ cdecl AttachEventQueueToTablet(long) X11DRV_AttachEventQueueToTablet
 @ cdecl GetCurrentPacket(ptr) X11DRV_GetCurrentPacket

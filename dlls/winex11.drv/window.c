@@ -28,6 +28,7 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#include <sys/types.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
@@ -83,6 +84,8 @@ static Window user_time_window;
 static const char foreign_window_prop[] = "__wine_x11_foreign_window";
 static const char whole_window_prop[] = "__wine_x11_whole_window";
 static const char clip_window_prop[]  = "__wine_x11_clip_window";
+static const char unix_pid_prop[]     = "__wine_x11_unix_pid";
+static const char cx_tag_prop[]       = "__wine_x11_cx_tag"; /* CW Hack 9517 */
 
 static CRITICAL_SECTION win_data_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -198,6 +201,20 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
 
     if (!managed_mode) return FALSE;
 
+    /*
+     * CODEWEAVERS HACK
+     * Hack needed to have the mabinogi window not resized incorrectly
+     * by the x11 window manager.
+     */
+    if (1)
+    {
+        char class[80];
+        GetClassNameA(hwnd,class,sizeof class);
+
+        if (strcmp(class,"devcat_launcher") == 0)
+            return FALSE;
+    }
+
     /* child windows are not managed */
     style = GetWindowLongW( hwnd, GWL_STYLE );
     if ((style & (WS_CHILD|WS_POPUP)) == WS_CHILD) return FALSE;
@@ -208,6 +225,75 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
     if ((style & WS_CAPTION) == WS_CAPTION) return TRUE;
     /* windows with thick frame are managed */
     if (style & WS_THICKFRAME) return TRUE;
+
+    /*
+     * CODEWEAVERS HACKS
+     */
+    if (1)
+    {
+        char class[80], *p;
+        GetClassNameA(hwnd,class,sizeof class);
+        ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
+        /*
+         * In Scientific Word, the startup dialog should be managed.
+         * In SAP Netweaver, the tooltips should not (WS_EX_TOPMOST).
+         */
+        if ( (strcmp(class,"#32770")==0) &&
+            !(ex_style & WS_EX_TOPMOST) )
+            return TRUE;
+        if (strcmp(class,"SplashWnd")==0)
+            return TRUE;
+        if (strcmp(class,"iTunes")==0)
+            return TRUE;
+        if (strcmp(class,"QuickTimePlayerMain") == 0)
+            return TRUE; /* QuickTime 7.1 */
+        if ((p = strrchr(class, '\\')) && strcmp(p+1,"QuickTimePlayer.exe") == 0)
+            return TRUE; /* QuickTime 6.x */
+        if (strcmp(class,"PSFloatC")==0)
+            return TRUE;
+        /* the office 97 splash screen is not a toolbar */
+        if (strcmp(class,"MsoSplash") == 0)
+            return TRUE;
+        if ((strcmp(class,"IEFrame") == 0) && (style & WS_SYSMENU))
+            return TRUE;
+        /* for CRPSClient for WorldVistA */
+        if (strcmp(class,"TfrmSplash") == 0)
+            return TRUE;
+        /* Halo setup window */
+        if (strcmp(class,"EBUSetupWnd") == 0)
+            return TRUE;
+        /* AWR line style popup */
+        if (strcmp(class,"WTL_LineStyleColorDD") == 0)
+            return TRUE;
+        /* AWR fill style popup */
+        if (strcmp(class,"WTL_PatternColorDD") == 0)
+            return TRUE;
+        /* Quickbooks InstallShield window */
+        if (strcmp(class,"DlgcacClsName") == 0)
+            return TRUE;
+
+#ifdef __APPLE__
+        /* Macos does not like those windows to be managed, but Linux needs that(handled below in the
+         * POPUP | SYSMENU case
+         */
+        /* EVE online - Does not redraw otherwise*/
+        if(strcmp(class, "eveSplatter") == 0 || strcmp(class, "triuiScreen") == 0)
+            return FALSE;
+#endif
+
+        /* for outlook 2003 completion window */
+        if (strcmp(class,"REListBox20W") == 0 && (style & WS_POPUP) &&
+            (style & WS_SYSMENU))
+            return FALSE;
+
+        /* Outlook 2003 "Toast" window that appears when a new message is
+         * received. Should not be managed to prevent it grabbing keyboard
+         * focus */
+        if (strcmp(class,"NUIDialog") == 0 &&
+            (style & (WS_POPUP|WS_SYSMENU)) == (WS_POPUP|WS_SYSMENU))
+            return FALSE;
+    }
+
     if (style & WS_POPUP)
     {
         HMONITOR hmon;
@@ -259,7 +345,9 @@ static unsigned long get_mwm_decorations( struct x11drv_win_data *data,
     if (IsRectEmpty( &data->window_rect )) return 0;
     if (data->shaped) return 0;
 
+#ifndef __APPLE__
     if (ex_style & WS_EX_TOOLWINDOW) return 0;
+#endif
     if (ex_style & WS_EX_LAYERED) return 0;
 
     if ((style & WS_CAPTION) == WS_CAPTION)
@@ -1425,6 +1513,8 @@ static void create_whole_window( struct x11drv_win_data *data )
     DWORD layered_flags;
     HRGN win_rgn;
     POINT pos;
+    const char* tag;
+    long tag_num;
 
     if (!data->managed && is_window_managed( data->hwnd, SWP_NOACTIVATE, &data->window_rect ))
     {
@@ -1462,6 +1552,14 @@ static void create_whole_window( struct x11drv_win_data *data )
 
     XSaveContext( data->display, data->whole_window, winContext, (char *)data->hwnd );
     SetPropA( data->hwnd, whole_window_prop, (HANDLE)data->whole_window );
+    SetPropA( data->hwnd, unix_pid_prop, (HANDLE)getpid() );
+    /* CodeWeavers Hack 9517 */
+    if ((tag = getenv("CX_WINDOW_TAG")) && (tag_num = atol(tag)))
+    {
+        SetPropA( data->hwnd, cx_tag_prop, (HANDLE)tag_num );
+        XChangeProperty( data->display, data->whole_window, x11drv_atom(_CX_APPLEWM_TAG),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char*)&tag_num, 1 );
+    }
 
     /* set the window text */
     if (!InternalGetWindowText( data->hwnd, text, sizeof(text)/sizeof(WCHAR) )) text[0] = 0;
@@ -1621,6 +1719,41 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
     XDeleteContext( gdi_display, (XID)hwnd, win_data_context );
     release_win_data( data );
     HeapFree( GetProcessHeap(), 0, data );
+}
+
+
+/************************************************************************
+ *      wine_x11_adopt_window   (WINEX11.DRV.@)
+ *
+ * Adopt an external X window into the specified hwnd.
+ */
+BOOL wine_x11_adopt_window( HWND hwnd, Window xwin )
+{
+    Display *display = thread_init_display();
+    struct x11drv_win_data *data;
+    HWND old_parent, parent;
+    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
+
+    if (!(parent = create_foreign_window( display, xwin ))) return FALSE;
+
+    if (!(data = get_win_data( hwnd ))) return FALSE;
+    make_window_embedded( data );
+    release_win_data( data );
+
+    old_parent = SetParent( hwnd, parent );
+    SetWindowLongW( hwnd, GWL_STYLE, (style & ~WS_POPUP) | WS_CHILD );
+
+    if (old_parent != GetDesktopWindow())
+        PostMessageW( old_parent, WM_CLOSE, 0, 0 );  /* make old parent destroy itself if it no longer has children */
+
+    TRACE( "new window for %p\n", hwnd );
+
+    if (!(data = get_win_data( hwnd ))) return FALSE;
+    XReparentWindow( display, data->whole_window, xwin, 0, 0 );
+    XMapWindow( display, data->whole_window );
+    XSync( display, False );
+    release_win_data( data );
+    return TRUE;
 }
 
 

@@ -30,6 +30,7 @@
 #include "wine/library.h"
 #include "x11drv.h"
 #include "wine/debug.h"
+#include "wine/unicode.h" /* CrossOver Hack 11692 */
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
@@ -67,12 +68,39 @@ static inline int monitor_to_index( HMONITOR handle )
     return index - 1;
 }
 
-static void query_work_area( RECT *rc_work )
+/* CodeWeavers Hack bug 5752: Converted to return a region and to query
+ * the _CX_WORKAREA property of the root window in preference to _NET_WORKAREA. */
+static HRGN query_work_area(void)
 {
     Atom type;
     int format;
     unsigned long count, remaining;
     long *work_area;
+    HRGN region = NULL;
+
+    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_CX_WORKAREA), 0,
+                             ~0, False, XA_CARDINAL, &type, &format, &count,
+                             &remaining, (unsigned char **)&work_area ))
+    {
+        if (type == XA_CARDINAL && format == 32 && count >= 4)
+        {
+            int i;
+            HRGN temp = CreateRectRgn( 0, 0, 0, 0 );
+
+            region = CreateRectRgn( 0, 0, 0, 0 );
+            for (i = 0; i + 3 < count; i += 4)
+            {
+                SetRectRgn( temp, work_area[i+0], work_area[i+1],
+                            work_area[i+0] + work_area[i+2], work_area[i+1] + work_area[i+3] );
+                CombineRgn( region, region, temp, RGN_OR );
+            }
+
+            DeleteObject( temp );
+            XFree( work_area );
+            return region;
+        }
+        XFree( work_area );
+    }
 
     if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_NET_WORKAREA), 0,
                              ~0, False, XA_CARDINAL, &type, &format, &count,
@@ -80,11 +108,13 @@ static void query_work_area( RECT *rc_work )
     {
         if (type == XA_CARDINAL && format == 32 && count >= 4)
         {
-            SetRect( rc_work, work_area[0], work_area[1],
-                     work_area[0] + work_area[2], work_area[1] + work_area[3] );
+            region = CreateRectRgn( work_area[0], work_area[1],
+                                    work_area[0] + work_area[2], work_area[1] + work_area[3] );
         }
         XFree( work_area );
     }
+
+    return region;
 }
 
 #ifdef SONAME_LIBXINERAMA
@@ -113,16 +143,18 @@ static int query_screens(void)
 {
     int i, count, event_base, error_base;
     XineramaScreenInfo *screens;
-    RECT rc_work = {0, 0, 0, 0};
+    HRGN workarea_rgn, temp_rgn;
 
     if (!monitors)  /* first time around */
         load_xinerama();
 
-    query_work_area( &rc_work );
-
     if (!pXineramaQueryExtension || !pXineramaQueryScreens ||
         !pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
         !(screens = pXineramaQueryScreens( gdi_display, &count ))) return 0;
+
+    /* CodeWeavers Hack bug 5752: made query_work_area return a region */
+    workarea_rgn = query_work_area();
+    temp_rgn = CreateRectRgn( 0, 0, 0, 0 );
 
     if (monitors != &default_monitor) HeapFree( GetProcessHeap(), 0, monitors );
     if ((monitors = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*monitors) )))
@@ -136,16 +168,46 @@ static int query_screens(void)
             monitors[i].rcMonitor.right  = screens[i].x_org + screens[i].width;
             monitors[i].rcMonitor.bottom = screens[i].y_org + screens[i].height;
             monitors[i].dwFlags          = 0;
-            if (!IntersectRect( &monitors[i].rcWork, &rc_work, &monitors[i].rcMonitor ))
+            if (workarea_rgn && temp_rgn)
+            {
+                SetRectRgn( temp_rgn, monitors[i].rcMonitor.left, monitors[i].rcMonitor.top,
+                            monitors[i].rcMonitor.right, monitors[i].rcMonitor.bottom );
+                if (CombineRgn( temp_rgn, temp_rgn, workarea_rgn, RGN_AND ) != ERROR)
+                    GetRgnBox( temp_rgn, &monitors[i].rcWork );
+            }
+            else
                 monitors[i].rcWork = monitors[i].rcMonitor;
-            /* FIXME: using the same device name for all monitors for now */
-            lstrcpyW( monitors[i].szDevice, default_monitor.szDevice );
+            /* CrossOver Hack 11692: Unique device names from GetMonitorInfo */
+            if (unique_monitor_names)
+                monitors[i].szDevice[0] = 0;
+            else
+                /* FIXME: using the same device name for all monitors for now */
+                lstrcpyW( monitors[i].szDevice, default_monitor.szDevice );
         }
 
         get_primary()->dwFlags |= MONITORINFOF_PRIMARY;
+
+        /* CrossOver Hack 11692: Unique device names from GetMonitorInfo */
+        if (unique_monitor_names)
+        {
+            static const WCHAR monitor_nameW[] = { '\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0 };
+            int num = 1;
+
+            snprintfW( get_primary()->szDevice, sizeof(get_primary()->szDevice) / sizeof(WCHAR),
+                       monitor_nameW, num++ );
+
+            for (i = 0; i < nb_monitors; i++)
+            {
+                if (!monitors[i].szDevice[0])
+                    snprintfW( monitors[i].szDevice, sizeof(monitors[i].szDevice) / sizeof(WCHAR),
+                               monitor_nameW, num++ );
+            }
+        }
     }
     else count = 0;
 
+    DeleteObject( workarea_rgn );
+    DeleteObject( temp_rgn );
     XFree( screens );
     return count;
 }
@@ -195,9 +257,19 @@ void xinerama_init( unsigned int width, unsigned int height )
 
     if (root_window != DefaultRootWindow( gdi_display ) || !query_screens())
     {
+        /* CodeWeavers Hack bug 5752: made query_work_area return a region */
+        HRGN workarea, temp;
+
         default_monitor.rcWork = default_monitor.rcMonitor = rect;
-        if (root_window == DefaultRootWindow( gdi_display ))
-            query_work_area( &default_monitor.rcWork );
+        if (root_window == DefaultRootWindow( gdi_display ) &&
+            (workarea = query_work_area()))
+        {
+            if ((temp = CreateRectRgnIndirect( &default_monitor.rcWork )) &&
+                CombineRgn( temp, temp, workarea, RGN_AND ) != ERROR)
+                GetRgnBox( temp, &default_monitor.rcWork );
+            DeleteObject( temp );
+            DeleteObject( workarea );
+        }
         nb_monitors = 1;
         monitors = &default_monitor;
     }
