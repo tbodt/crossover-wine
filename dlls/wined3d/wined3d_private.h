@@ -27,8 +27,10 @@
 
 #ifdef USE_WIN32_OPENGL
 #define WINE_GLAPI __stdcall
+#define WINED3DPTR
 #else
 #define WINE_GLAPI
+#define WINED3DPTR HOSTPTR
 #endif
 
 #include <assert.h>
@@ -57,6 +59,10 @@
 #include "wined3d_vk.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
+#include "wine/static_strings.h"
+#if defined(__i386_on_x86_64__) && defined(USE_WIN32_OPENGL)
+#define WINE_GL_WIN32
+#endif
 #include "wine/wgl_driver.h"
 
 #define MAKEDWORD_VERSION(maj, min) (((maj & 0xffffu) << 16) | (min & 0xffffu))
@@ -73,6 +79,13 @@
 #define WINED3D_QUIRK_LIMITED_TEX_FILTERING     0x00000100
 #define WINED3D_QUIRK_BROKEN_ARB_FOG            0x00000200
 #define WINED3D_QUIRK_NO_INDEPENDENT_BIT_DEPTHS 0x00000400
+
+#define WINED3D_CX_QUIRK_APPLE_DOUBLE_BUFFER    0x00010000
+#define WINED3D_CX_QUIRK_GLSL_CLIP_BROKEN       0x00020000
+#define WINED3D_CX_QUIRK_TEXCOORD_FOG           0x00040000
+#define WINED3D_CX_QUIRK_BROKEN_ARA             0x00080000
+#define WINED3D_CX_QUIRK_BLIT                   0x00100000
+#define WINED3D_CX_QUIRK_BROKEN_ROUND           0x00200000
 
 #define WINED3D_MAX_DIRTY_REGION_COUNT 7
 
@@ -182,9 +195,9 @@ struct wined3d_d3d_limits
     float pointsize_max;
 };
 
-typedef void (WINE_GLAPI *wined3d_ffp_attrib_func)(const void *data);
-typedef void (WINE_GLAPI *wined3d_ffp_texcoord_func)(GLenum unit, const void *data);
-typedef void (WINE_GLAPI *wined3d_generic_attrib_func)(GLuint idx, const void *data);
+typedef void (WINE_GLAPI *WINED3DPTR wined3d_ffp_attrib_func)(const void *WINED3DPTR data);
+typedef void (WINE_GLAPI *WINED3DPTR wined3d_ffp_texcoord_func)(GLenum unit, const void *WINED3DPTR data);
+typedef void (WINE_GLAPI *WINED3DPTR wined3d_generic_attrib_func)(GLuint idx, const void *WINED3DPTR data);
 extern wined3d_ffp_attrib_func specular_func_3ubv DECLSPEC_HIDDEN;
 
 struct wined3d_ffp_attrib_ops
@@ -220,6 +233,7 @@ struct wined3d_d3d_info
     uint32_t srgb_write_control : 1;
     uint32_t clip_control : 1;
     uint32_t full_ffp_varyings : 1;
+    uint32_t emulated_clipplanes : 1;
     enum wined3d_feature_level feature_level;
 
     DWORD multisample_draw_location;
@@ -322,7 +336,7 @@ static inline GLenum wined3d_gl_min_mip_filter(enum wined3d_texture_filter_type 
  *
  * See GL_NV_half_float for a reference of the FLOAT16 / GL_HALF format
  */
-static inline float float_16_to_32(const unsigned short *in)
+static inline float float_16_to_32(const unsigned short *WINED3DPTR in)
 {
     const unsigned short s = ((*in) & 0x8000u);
     const unsigned short e = ((*in) & 0x7c00u) >> 10;
@@ -375,7 +389,7 @@ static inline unsigned int wined3d_popcount(unsigned int x)
 
 static inline void wined3d_pause(void)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     __asm__ __volatile__( "rep;nop" : : : "memory" );
 #endif
 }
@@ -429,6 +443,27 @@ struct wined3d_settings
 };
 
 extern struct wined3d_settings wined3d_settings DECLSPEC_HIDDEN;
+
+enum wined3d_map_buffer_mode
+{
+    WINED3D_MAPBUF_ALWAYS,
+    WINED3D_MAPBUF_NEVER,
+    WINED3D_MAPBUF_NEVER_NV
+};
+
+struct cxgames_hacks
+{
+    BOOL safe_vs_consts;
+    /* CodeWeavers Hack bug 10104 - Allow registry to fix vs constants. */
+    UINT fixed_vs_constants_limit;
+    /* CodeWeavers Hack bug 5501 - Allow registry disabling of OpenGL extensions. */
+    char *disabled_extensions;
+    BOOL no_pow_abs;
+    BOOL no_intz;
+    enum wined3d_map_buffer_mode allow_glmapbuffer;
+};
+
+extern struct cxgames_hacks cxgames_hacks DECLSPEC_HIDDEN;
 
 enum wined3d_shader_byte_code_format
 {
@@ -1383,7 +1418,8 @@ struct ps_compile_args
     WORD                        np2_fixup;
     WORD shadow; /* WINED3D_MAX_FRAGMENT_SAMPLERS, 16 */
     WORD texcoords_initialized; /* WINED3D_MAX_TEXTURES, 8 */
-    WORD padding_to_dword;
+    /* Emulate clipping via KIL / discard. */
+    BOOL clip;
     DWORD pointsprite : 1;
     DWORD flatshading : 1;
     DWORD alpha_test_func : 3;
@@ -1409,6 +1445,7 @@ struct vs_compile_args
     BYTE padding : 1;
     WORD swizzle_map;   /* MAX_ATTRIBS, 16 */
     unsigned int next_shader_input_count;
+    DWORD emulated_clipplanes;
     DWORD interpolation_mode[WINED3D_PACKED_INTERPOLATION_SIZE];
 };
 
@@ -2636,6 +2673,10 @@ enum wined3d_pci_device
     CARD_INTEL_HD630_2              = 0x591b,
 };
 
+#ifndef USE_WIN32_OPENGL
+#include "wine/hostaddrspace_enter.h"
+#endif
+
 struct wined3d_fbo_ops
 {
     GLboolean (WINE_GLAPI *glIsRenderbuffer)(GLuint renderbuffer);
@@ -2670,6 +2711,10 @@ struct wined3d_fbo_ops
             GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
     void (WINE_GLAPI *glGenerateMipmap)(GLenum target);
 };
+
+#ifndef USE_WIN32_OPENGL
+#include "wine/hostaddrspace_exit.h"
+#endif
 
 struct wined3d_gl_limits
 {
@@ -2726,11 +2771,11 @@ struct wined3d_gl_info
     GLint wrap_lookup[WINED3D_TADDRESS_MIRROR_ONCE - WINED3D_TADDRESS_WRAP + 1];
 
     HGLRC (WINAPI *p_wglCreateContextAttribsARB)(HDC dc, HGLRC share, const GLint *attribs);
-    struct opengl_funcs gl_ops;
+    struct WINE_OPENGL_FUNCS gl_ops;
     struct wined3d_fbo_ops fbo_ops;
 
-    void (WINE_GLAPI *p_glDisableWINE)(GLenum cap);
-    void (WINE_GLAPI *p_glEnableWINE)(GLenum cap);
+    void (WINE_GLAPI *WINED3DPTR p_glDisableWINE)(GLenum cap);
+    void (WINE_GLAPI *WINED3DPTR p_glEnableWINE)(GLenum cap);
 };
 
 /* The driver names reflect the lowest GPU supported
@@ -3057,6 +3102,7 @@ struct wined3d_ffp_vs_settings
     DWORD swizzle_map     : 16; /* MAX_ATTRIBS, 16 */
     DWORD padding         : 2;
 
+    DWORD emulated_clipplanes;
     DWORD texgen[WINED3D_MAX_TEXTURES];
 };
 
@@ -5281,7 +5327,49 @@ static inline void wined3d_viewport_get_z_range(const struct wined3d_viewport *v
     *max_z = max(vp->max_z, vp->min_z + 0.001f);
 }
 
+static inline DWORD find_emulated_clipplanes(const struct wined3d_context *context,
+        const struct wined3d_state *state)
+{
+    const struct wined3d_d3d_info *d3d_info = context->d3d_info;
+
+    if (!d3d_info->emulated_clipplanes)
+        return 0;
+    if (!state->render_states[WINED3D_RS_CLIPPING])
+        return 0;
+    /* With pixelshaders, emulate all enabled clipplanes (disabled per
+     * shader if no free texcoord is found). */
+    if (use_ps(state))
+        return state->render_states[WINED3D_RS_CLIPPLANEENABLE];
+    if (context->lowest_disabled_stage >= d3d_info->limits.ffp_blend_stages)
+        return 0;
+    return state->render_states[WINED3D_RS_CLIPPLANEENABLE];
+}
+
 /* The WNDCLASS-Name for the fake window which we use to retrieve the GL capabilities */
 #define WINED3D_OPENGL_WINDOW_CLASS_NAME "WineD3D_OpenGL"
+
+static inline void wined3d_set_fpu_cw(WORD cw)
+{
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
+    __asm__ volatile ("fnclex");
+    __asm__ volatile ("fldcw %0" : : "m" (cw));
+#elif defined(__i386__) && defined(_MSC_VER)
+    __asm fnclex;
+    __asm fldcw cw;
+#endif
+}
+
+static inline WORD wined3d_get_fpu_cw(void)
+{
+    WORD cw = 0;
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
+    __asm__ volatile ("fnstcw %0" : "=m" (cw));
+#elif defined(__i386__) && defined(_MSC_VER)
+    __asm fnstcw cw;
+#endif
+    return cw;
+}
+
+#define WINED3D_DEFAULT_FPU_CW 0x037f
 
 #endif

@@ -61,6 +61,10 @@
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
 
+#ifdef __APPLE__
+extern int ProcessMacInput(XKeyEvent*);
+#endif
+
 static int min_keycode, max_keycode, keysyms_per_keycode;
 static KeySym *key_mapping;
 static WORD keyc2vkey[256], keyc2scan[256];
@@ -1357,6 +1361,10 @@ BOOL X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     }
     else
         ascii_chars = XLookupString(event, buf, sizeof(buf), &keysym, NULL);
+
+#ifdef __APPLE__
+	ProcessMacInput(event);
+#endif
 
     TRACE_(key)("nbyte = %d, status %d\n", ascii_chars, status);
 

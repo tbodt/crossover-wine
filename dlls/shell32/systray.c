@@ -23,6 +23,12 @@
 #define NONAMELESSUNION
 
 #include <stdarg.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -128,6 +134,7 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
 {
     HWND tray;
     COPYDATASTRUCT cds;
+    char * HOSTPTR socketname;
     struct notify_data data_buffer;
     struct notify_data *data = &data_buffer;
     BOOL ret;
@@ -242,6 +249,35 @@ noicon:
 
     cds.lpData = data;
     ret = SendMessageW(tray, WM_COPYDATA, (WPARAM)nid->hWnd, (LPARAM)&cds);
+
+    /* If there's a socket available for communicating back to CrossOver,
+        send a message with everything we know. */
+    if ((socketname = getenv("CX_SYSTRAY_SOCKET")))
+    {
+        struct sockaddr_un sa;
+        int sock = socket(AF_UNIX,SOCK_STREAM,0);
+
+        WINE_TRACE("Sending a systray notification to CrossOver.\n");
+
+        sa.sun_family=AF_UNIX;
+        lstrcpynA(sa.sun_path,socketname,sizeof(sa.sun_path));
+        sa.sun_path[sizeof(sa.sun_path) - 1] = 0;
+
+        if (!connect(sock, (struct sockaddr *) &sa, sizeof(sa)))
+        {
+            uint messageid = WM_COPYDATA;
+            write(sock,&messageid,sizeof(messageid));
+            write(sock,&dwMessage,sizeof(dwMessage));
+            write(sock,&cds.cbData,sizeof(cds.cbData));
+            write(sock,cds.lpData,cds.cbData);
+        }
+        else
+        {
+            WINE_WARN("When sending systray icon, failed to connect to launch-notification socket %s.  errno: %d\n",socketname,errno);
+        }
+        close(sock);
+    }
+
     if (data != &data_buffer) heap_free( data );
     return ret;
 }

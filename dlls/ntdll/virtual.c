@@ -48,6 +48,10 @@
 # include <valgrind/valgrind.h>
 #endif
 
+#ifdef __APPLE__ /* CrossOver Hack #16371 */
+#include <mach-o/dyld.h>
+#endif
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #define NONAMELESSUNION
@@ -56,6 +60,7 @@
 #include "wine/library.h"
 #include "wine/server.h"
 #include "wine/exception.h"
+#define WINE_RBTREE_HOSTADDRSPACE
 #include "wine/rbtree.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -68,13 +73,15 @@ WINE_DECLARE_DEBUG_CHANNEL(module);
 #endif
 
 /* File view */
+#include "wine/hostptraddrspace_enter.h"
 struct file_view
 {
     struct wine_rb_entry entry;  /* entry in global view tree */
-    void         *base;          /* base address */
+    void * WIN32PTR base;        /* base address */
     size_t        size;          /* size in bytes */
     unsigned int  protect;       /* protection for all pages at allocation time and SEC_* flags */
 };
+#include "wine/hostptraddrspace_exit.h"
 
 /* per-page protection flags */
 #define VPROT_READ       0x01
@@ -119,7 +126,7 @@ static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static RTL_CRITICAL_SECTION csVirtual = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static const UINT page_shift = 12;
 static const UINT_PTR page_mask = 0xfff;
 /* Note: these are Windows limits, you cannot change them. */
@@ -127,6 +134,7 @@ static void *address_space_limit = (void *)0xc0000000;  /* top of the total avai
 static void *user_space_limit    = (void *)0x7fff0000;  /* top of the user address space */
 static void *working_set_limit   = (void *)0x7fff0000;  /* top of the current working set */
 static void *address_space_start = (void *)0x110000;    /* keep DOS area clear */
+static void * const address_space_hard_limit = (void *)0xffff0000;  /* top of the total available address space */
 #elif defined(__x86_64__)
 static const UINT page_shift = 12;
 static const UINT_PTR page_mask = 0xfff;
@@ -134,6 +142,7 @@ static void *address_space_limit = (void *)0x7fffffff0000;
 static void *user_space_limit    = (void *)0x7fffffff0000;
 static void *working_set_limit   = (void *)0x7fffffff0000;
 static void *address_space_start = (void *)0x10000;
+static void * const address_space_hard_limit = (void *)0xffffffffffff0000;
 #elif defined(__arm__)
 static const UINT page_shift = 12;
 static const UINT_PTR page_mask = 0xfff;
@@ -141,6 +150,7 @@ static void *address_space_limit = (void *)0xc0000000;
 static void *user_space_limit    = (void *)0x7fff0000;
 static void *working_set_limit   = (void *)0x7fff0000;
 static void *address_space_start = (void *)0x10000;
+static void * const address_space_hard_limit = (void *)0xffff0000;
 #elif defined(__aarch64__)
 static const UINT page_shift = 12;
 static const UINT_PTR page_mask = 0xfff;
@@ -148,6 +158,7 @@ static void *address_space_limit = (void *)0xffffffff0000;
 static void *user_space_limit    = (void *)0x7fffffff0000;
 static void *working_set_limit   = (void *)0x7fffffff0000;
 static void *address_space_start = (void *)0x10000;
+static void * const address_space_hard_limit = (void *)0xffffffffffff0000;
 #else
 UINT_PTR page_size = 0;
 static UINT page_shift;
@@ -156,11 +167,20 @@ static void *address_space_limit;
 static void *user_space_limit;
 static void *working_set_limit;
 static void *address_space_start = (void *)0x10000;
+static void * const address_space_hard_limit = (void *)0xffff0000;
 #endif  /* __i386__ */
-static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 
-#define ROUND_ADDR(addr,mask) \
-   ((void *)((UINT_PTR)(addr) & ~(UINT_PTR)(mask)))
+static inline void *ROUND_ADDR(const void *addr, ULONG_HOSTPTR mask)
+{
+    return TRUNCCAST(void *, (ULONG_HOSTPTR)addr & ~mask);
+}
+
+#ifdef __i386_on_x86_64__
+static inline void * HOSTPTR ROUND_ADDR(const void * HOSTPTR addr, ULONG_HOSTPTR mask) __attribute__((overloadable))
+{
+    return (void * HOSTPTR)((ULONG_HOSTPTR)addr & ~mask);
+}
+#endif
 
 #define ROUND_SIZE(addr,size) \
    (((SIZE_T)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
@@ -174,7 +194,7 @@ static const size_t pages_vprot_mask = (1 << 20) - 1;
 static size_t pages_vprot_size;
 static BYTE **pages_vprot;
 #else  /* on 32-bit we use a simple array with one byte per page */
-static BYTE *pages_vprot;
+static BYTE * HOSTPTR pages_vprot;
 #endif
 
 static struct file_view *view_block_start, *view_block_end, *next_free_view;
@@ -271,7 +291,7 @@ static BOOL alloc_pages_vprot( const void *addr, size_t size )
     for (i = idx >> pages_vprot_shift; i < (end + pages_vprot_mask) >> pages_vprot_shift; i++)
     {
         if (pages_vprot[i]) continue;
-        if ((ptr = wine_anon_mmap( NULL, pages_vprot_mask + 1, PROT_READ | PROT_WRITE, 0 )) == (void *)-1)
+        if ((ptr = wine_anon_mmap( NULL, pages_vprot_mask + 1, PROT_READ | PROT_WRITE, 0 )) == MAP_FAILED_HOSTPTR)
             return FALSE;
         pages_vprot[i] = ptr;
     }
@@ -285,7 +305,7 @@ static BOOL alloc_pages_vprot( const void *addr, size_t size )
  *
  * View comparison function used for the rb tree.
  */
-static int compare_view( const void *addr, const struct wine_rb_entry *entry )
+static int compare_view( const void * HOSTPTR addr, const struct wine_rb_entry * HOSTPTR entry )
 {
     struct file_view *view = WINE_RB_ENTRY_VALUE( entry, struct file_view, entry );
 
@@ -425,8 +445,7 @@ static struct file_view *VIRTUAL_FindView( const void *addr, size_t size )
  */
 static inline UINT_PTR get_mask( ULONG alignment )
 {
-    if (!alignment) return 0xffff;  /* allocations are aligned to 64K by default */
-    if (alignment < page_shift) alignment = page_shift;
+    if (alignment < 16) return 0xffff;  /* some apps rely on all allocations being aligned to 64K */
     if (alignment > 21) return 0;
     return (1 << alignment) - 1;
 }
@@ -476,12 +495,22 @@ static inline BOOL is_write_watch_range( const void *addr, size_t size )
 
 
 /***********************************************************************
+ *           is_system_range
+ */
+static inline BOOL is_system_range( const void *addr, size_t size )
+{
+    struct file_view *view = VIRTUAL_FindView( addr, size );
+    return view && (view->protect & VPROT_SYSTEM);
+}
+
+
+/***********************************************************************
  *           find_view_range
  *
  * Find the first view overlapping at least part of the specified range.
  * The csVirtual section must be held by caller.
  */
-static struct file_view *find_view_range( const void *addr, size_t size )
+static struct file_view *find_view_range( const void * HOSTPTR addr, size_t size )
 {
     struct wine_rb_entry *ptr = views_tree.root;
 
@@ -489,8 +518,8 @@ static struct file_view *find_view_range( const void *addr, size_t size )
     {
         struct file_view *view = WINE_RB_ENTRY_VALUE( ptr, struct file_view, entry );
 
-        if ((const char *)view->base >= (const char *)addr + size) ptr = ptr->left;
-        else if ((const char *)view->base + view->size <= (const char *)addr) ptr = ptr->right;
+        if ((const char *)view->base >= (const char * HOSTPTR)addr + size) ptr = ptr->left;
+        else if ((const char *)view->base + view->size <= (const char * HOSTPTR)addr) ptr = ptr->right;
         else return view;
     }
     return NULL;
@@ -503,23 +532,23 @@ static struct file_view *find_view_range( const void *addr, size_t size )
  * Find first (resp. last, if top_down) view inside a range.
  * The csVirtual section must be held by caller.
  */
-static struct wine_rb_entry *find_view_inside_range( void **base_ptr, void **end_ptr, int top_down )
+static struct wine_rb_entry *find_view_inside_range( void * HOSTPTR *base_ptr, void * HOSTPTR *end_ptr, int top_down )
 {
     struct wine_rb_entry *first = NULL, *ptr = views_tree.root;
-    void *base = *base_ptr, *end = *end_ptr;
+    void * HOSTPTR base = *base_ptr, * HOSTPTR end = *end_ptr;
 
     /* find the first (resp. last) view inside the range */
     while (ptr)
     {
         struct file_view *view = WINE_RB_ENTRY_VALUE( ptr, struct file_view, entry );
-        if ((char *)view->base + view->size >= (char *)end)
+        if ((char *)view->base + view->size >= (char * HOSTPTR)end)
         {
             end = min( end, view->base );
             ptr = ptr->left;
         }
         else if (view->base <= base)
         {
-            base = max( (char *)base, (char *)view->base + view->size );
+            base = max( (char * HOSTPTR)base, (char *)view->base + view->size );
             ptr = ptr->right;
         }
         else
@@ -541,25 +570,25 @@ static struct wine_rb_entry *find_view_inside_range( void **base_ptr, void **end
  * Try mmaping some expected free memory region, eventually stepping and
  * retrying inside it, and return where it actually succeeded, or NULL.
  */
-static void* try_map_free_area( void *base, void *end, ptrdiff_t step,
-                                void *start, size_t size, int unix_prot )
+static void* HOSTPTR try_map_free_area( void * HOSTPTR base, void * HOSTPTR end, ptrdiff_t step,
+                                void * HOSTPTR start, size_t size, int unix_prot )
 {
-    void *ptr;
+    void * HOSTPTR ptr;
 
-    while (start && base <= start && (char*)start + size <= (char*)end)
+    while (start && base <= start && (char* HOSTPTR)start + size <= (char* HOSTPTR)end)
     {
         if ((ptr = wine_anon_mmap( start, size, unix_prot, 0 )) == start)
             return start;
         TRACE( "Found free area is already mapped, start %p.\n", start );
 
-        if (ptr != (void *)-1)
+        if (ptr != MAP_FAILED_HOSTPTR)
             munmap( ptr, size );
 
-        if ((step > 0 && (char *)end - (char *)start < step) ||
-            (step < 0 && (char *)start - (char *)base < -step) ||
+        if ((step > 0 && (char * HOSTPTR)end - (char * HOSTPTR)start < step) ||
+            (step < 0 && (char * HOSTPTR)start - (char * HOSTPTR)base < -step) ||
             step == 0)
             break;
-        start = (char *)start + step;
+        start = (char * HOSTPTR)start + step;
     }
 
     return NULL;
@@ -572,22 +601,22 @@ static void* try_map_free_area( void *base, void *end, ptrdiff_t step,
  * Find a free area between views inside the specified range and map it.
  * The csVirtual section must be held by caller.
  */
-static void *map_free_area( void *base, void *end, size_t size, size_t mask, int top_down,
+static void * HOSTPTR map_free_area( void * HOSTPTR base, void * HOSTPTR end, size_t size, size_t mask, int top_down,
                              int unix_prot )
 {
     struct wine_rb_entry *first = find_view_inside_range( &base, &end, top_down );
     ptrdiff_t step = top_down ? -(mask + 1) : (mask + 1);
-    void *start;
+    void * HOSTPTR start;
 
     if (top_down)
     {
-        start = ROUND_ADDR( (char *)end - size, mask );
+        start = ROUND_ADDR( (char * HOSTPTR)end - size, mask );
         if (start >= end || start < base) return NULL;
 
         while (first)
         {
             struct file_view *view = WINE_RB_ENTRY_VALUE( first, struct file_view, entry );
-            if ((start = try_map_free_area( (char *)view->base + view->size, (char *)start + size, step,
+            if ((start = try_map_free_area( (char *)view->base + view->size, (char * HOSTPTR)start + size, step,
                                             start, size, unix_prot ))) break;
             start = ROUND_ADDR( (char *)view->base - size, mask );
             /* stop if remaining space is not large enough */
@@ -597,8 +626,8 @@ static void *map_free_area( void *base, void *end, size_t size, size_t mask, int
     }
     else
     {
-        start = ROUND_ADDR( (char *)base + mask, mask );
-        if (!start || start >= end || (char *)end - (char *)start < size) return NULL;
+        start = ROUND_ADDR( (char * HOSTPTR)base + mask, mask );
+        if (!start || start >= end || (char * HOSTPTR)end - (char * HOSTPTR)start < size) return NULL;
 
         while (first)
         {
@@ -607,7 +636,7 @@ static void *map_free_area( void *base, void *end, size_t size, size_t mask, int
                                             start, size, unix_prot ))) break;
             start = ROUND_ADDR( (char *)view->base + view->size + mask, mask );
             /* stop if remaining space is not large enough */
-            if (!start || start >= end || (char *)end - (char *)start < size) return NULL;
+            if (!start || start >= end || (char * HOSTPTR)end - (char * HOSTPTR)start < size) return NULL;
             first = wine_rb_next( first );
         }
     }
@@ -626,21 +655,21 @@ static void *map_free_area( void *base, void *end, size_t size, size_t mask, int
  * The csVirtual section must be held by caller.
  * The range must be inside the preloader reserved range.
  */
-static void *find_reserved_free_area( void *base, void *end, size_t size, size_t mask, int top_down )
+static void * HOSTPTR find_reserved_free_area( void * HOSTPTR base, void * HOSTPTR end, size_t size, size_t mask, int top_down )
 {
     struct wine_rb_entry *first = find_view_inside_range( &base, &end, top_down );
-    void *start;
+    void * HOSTPTR start;
 
     if (top_down)
     {
-        start = ROUND_ADDR( (char *)end - size, mask );
+        start = ROUND_ADDR( (char * HOSTPTR )end - size, mask );
         if (start >= end || start < base) return NULL;
 
         while (first)
         {
             struct file_view *view = WINE_RB_ENTRY_VALUE( first, struct file_view, entry );
 
-            if ((char *)view->base + view->size <= (char *)start) break;
+            if ((char *)view->base + view->size <= (char * HOSTPTR)start) break;
             start = ROUND_ADDR( (char *)view->base - size, mask );
             /* stop if remaining space is not large enough */
             if (!start || start >= end || start < base) return NULL;
@@ -649,17 +678,17 @@ static void *find_reserved_free_area( void *base, void *end, size_t size, size_t
     }
     else
     {
-        start = ROUND_ADDR( (char *)base + mask, mask );
-        if (!start || start >= end || (char *)end - (char *)start < size) return NULL;
+        start = ROUND_ADDR( (char * HOSTPTR)base + mask, mask );
+        if (!start || start >= end || (char * HOSTPTR)end - (char * HOSTPTR)start < size) return NULL;
 
         while (first)
         {
             struct file_view *view = WINE_RB_ENTRY_VALUE( first, struct file_view, entry );
 
-            if ((char *)view->base >= (char *)start + size) break;
+            if ((char *)view->base >= (char * HOSTPTR)start + size) break;
             start = ROUND_ADDR( (char *)view->base + view->size + mask, mask );
             /* stop if remaining space is not large enough */
-            if (!start || start >= end || (char *)end - (char *)start < size) return NULL;
+            if (!start || start >= end || (char * HOSTPTR)end - (char * HOSTPTR)start < size) return NULL;
             first = wine_rb_next( first );
         }
     }
@@ -673,16 +702,16 @@ static void *find_reserved_free_area( void *base, void *end, size_t size, size_t
  * Add a reserved area to the list maintained by libwine.
  * The csVirtual section must be held by caller.
  */
-static void add_reserved_area( void *addr, size_t size )
+static void add_reserved_area( void * HOSTPTR addr, size_t size )
 {
-    TRACE( "adding %p-%p\n", addr, (char *)addr + size );
+    TRACE( "adding %p-%p\n", addr, (char * HOSTPTR)addr + size );
 
     if (addr < user_space_limit)
     {
         /* unmap the part of the area that is below the limit */
-        assert( (char *)addr + size > (char *)user_space_limit );
-        munmap( addr, (char *)user_space_limit - (char *)addr );
-        size -= (char *)user_space_limit - (char *)addr;
+        assert( (char * HOSTPTR)addr + size > (char *)user_space_limit );
+        munmap( addr, (char *)user_space_limit - (char * HOSTPTR)addr );
+        size -= (char *)user_space_limit - (char * HOSTPTR)addr;
         addr = user_space_limit;
     }
     /* blow away existing mappings */
@@ -697,21 +726,22 @@ static void add_reserved_area( void *addr, size_t size )
  * Remove a reserved area from the list maintained by libwine.
  * The csVirtual section must be held by caller.
  */
-static void remove_reserved_area( void *addr, size_t size )
+static void remove_reserved_area( void * HOSTPTR start, size_t size )
 {
     struct file_view *view;
+    char * HOSTPTR addr = start;
 
-    TRACE( "removing %p-%p\n", addr, (char *)addr + size );
+    TRACE( "removing %p-%p\n", addr, addr + size );
     wine_mmap_remove_reserved_area( addr, size, 0 );
 
     /* unmap areas not covered by an existing view */
     WINE_RB_FOR_EACH_ENTRY( view, &views_tree, struct file_view, entry )
     {
-        if ((char *)view->base >= (char *)addr + size) break;
-        if ((char *)view->base + view->size <= (char *)addr) continue;
-        if (view->base > addr) munmap( addr, (char *)view->base - (char *)addr );
-        if ((char *)view->base + view->size > (char *)addr + size) return;
-        size = (char *)addr + size - ((char *)view->base + view->size);
+        if ((char *)view->base >= addr + size) break;
+        if ((char *)view->base + view->size <= addr) continue;
+        if (view->base > (void * HOSTPTR)addr) munmap( addr, (char *)view->base - addr );
+        if ((char *)view->base + view->size > addr + size) return;
+        size = addr + size - ((char *)view->base + view->size);
         addr = (char *)view->base + view->size;
     }
     munmap( addr, size );
@@ -720,9 +750,9 @@ static void remove_reserved_area( void *addr, size_t size )
 
 struct area_boundary
 {
-    void  *base;
+    void * HOSTPTR base;
     size_t size;
-    void  *boundary;
+    void * HOSTPTR boundary;
 };
 
 /***********************************************************************
@@ -732,17 +762,17 @@ struct area_boundary
  * in the specified region. If no boundaries are found, result is NULL.
  * The csVirtual section must be held by caller.
  */
-static int get_area_boundary_callback( void *start, size_t size, void *arg )
+static int get_area_boundary_callback( void * HOSTPTR start, size_t size, void * HOSTPTR arg )
 {
-    struct area_boundary *area = arg;
-    void *end = (char *)start + size;
+    struct area_boundary * HOSTPTR area = arg;
+    void * HOSTPTR end = (char * HOSTPTR)start + size;
 
     area->boundary = NULL;
     if (area->base >= end) return 0;
-    if ((char *)start >= (char *)area->base + area->size) return 1;
+    if ((char * HOSTPTR)start >= (char * HOSTPTR)area->base + area->size) return 1;
     if (area->base >= start)
     {
-        if ((char *)area->base + area->size > (char *)end)
+        if ((char * HOSTPTR)area->base + area->size > (char * HOSTPTR)end)
         {
             area->boundary = end;
             return 1;
@@ -759,9 +789,9 @@ static int get_area_boundary_callback( void *start, size_t size, void *arg )
  *
  * Check if an address range goes beyond a given limit.
  */
-static inline BOOL is_beyond_limit( const void *addr, size_t size, const void *limit )
+static inline BOOL is_beyond_limit( const void * HOSTPTR addr, size_t size, const void * HOSTPTR limit )
 {
-    return (addr >= limit || (const char *)addr + size > (const char *)limit);
+    return (addr >= limit || (const char * HOSTPTR)addr + size > (const char * HOSTPTR)limit);
 }
 
 
@@ -771,7 +801,7 @@ static inline BOOL is_beyond_limit( const void *addr, size_t size, const void *l
  * Unmap an area, or simply replace it by an empty mapping if it is
  * in a reserved area. The csVirtual section must be held by caller.
  */
-static inline void unmap_area( void *addr, size_t size )
+static inline void unmap_area( void * HOSTPTR addr, size_t size )
 {
     switch (wine_mmap_is_in_reserved_area( addr, size ))
     {
@@ -783,7 +813,7 @@ static inline void unmap_area( void *addr, size_t size )
         area.size = size;
         wine_mmap_enum_reserved_areas( get_area_boundary_callback, &area, 0 );
         assert( area.boundary );
-        lower_size = (char *)area.boundary - (char *)addr;
+        lower_size = (char * HOSTPTR)area.boundary - (char * HOSTPTR)addr;
         unmap_area( addr, lower_size );
         unmap_area( area.boundary, size - lower_size );
         break;
@@ -802,6 +832,55 @@ static inline void unmap_area( void *addr, size_t size )
 }
 
 
+struct alloc_area
+{
+    size_t size;
+    size_t mask;
+    int    top_down;
+    void * HOSTPTR limit;
+    void * HOSTPTR result;
+};
+
+/***********************************************************************
+ *           alloc_reserved_area_callback
+ *
+ * Try to map some space inside a reserved area. Callback for wine_mmap_enum_reserved_areas.
+ */
+static int alloc_reserved_area_callback( void * HOSTPTR start, size_t size, void * HOSTPTR arg )
+{
+    struct alloc_area * HOSTPTR alloc = arg;
+    void * HOSTPTR end = (char * HOSTPTR)start + size;
+
+    if (is_beyond_limit( start, size, alloc->limit )) end = alloc->limit;
+    if (start < address_space_start) start = address_space_start;
+    if (start >= end) return 0;
+
+    /* make sure we don't touch the preloader reserved range */
+    if (preload_reserve_end >= start)
+    {
+        if (preload_reserve_end >= end)
+        {
+            if (preload_reserve_start <= start) return 0;  /* no space in that area */
+            if (preload_reserve_start < end) end = preload_reserve_start;
+        }
+        else if (preload_reserve_start <= start) start = preload_reserve_end;
+        else
+        {
+            /* range is split in two by the preloader reservation, try first part */
+            if ((alloc->result = find_reserved_free_area( start, preload_reserve_start, alloc->size,
+                                                          alloc->mask, alloc->top_down )))
+                return 1;
+            /* then fall through to try second part */
+            start = preload_reserve_end;
+        }
+    }
+    if ((alloc->result = find_reserved_free_area( start, end, alloc->size, alloc->mask, alloc->top_down )))
+        return 1;
+
+    return 0;
+}
+
+
 /***********************************************************************
  *           alloc_view
  *
@@ -812,13 +891,27 @@ static struct file_view *alloc_view(void)
     if (next_free_view)
     {
         struct file_view *ret = next_free_view;
-        next_free_view = *(struct file_view **)ret;
+        next_free_view = *(struct file_view ** HOSTPTR)ret;
         return ret;
     }
     if (view_block_start == view_block_end)
     {
-        void *ptr = wine_anon_mmap( NULL, view_block_size, PROT_READ | PROT_WRITE, 0 );
-        if (ptr == (void *)-1) return NULL;
+        void * HOSTPTR ptr = MAP_FAILED_HOSTPTR;
+        struct alloc_area alloc;
+
+        alloc.size = view_block_size;
+        alloc.mask = 0;
+        alloc.top_down = TRUE;
+        alloc.limit = (void * HOSTPTR)~(ULONG_HOSTPTR)0;
+        if (wine_mmap_enum_reserved_areas( alloc_reserved_area_callback, &alloc, TRUE ))
+        {
+            ptr = wine_anon_mmap( alloc.result, view_block_size, PROT_READ | PROT_WRITE, MAP_FIXED );
+            if (ptr == alloc.result)
+                wine_mmap_remove_reserved_area( ptr, view_block_size, 0 );
+        }
+        if (ptr == MAP_FAILED_HOSTPTR)
+            ptr = wine_anon_mmap( NULL, view_block_size, PROT_READ | PROT_WRITE, 0 );
+        if (ptr == MAP_FAILED_HOSTPTR) return NULL;
         view_block_start = ptr;
         view_block_end = view_block_start + view_block_size / sizeof(*view_block_start);
     }
@@ -836,7 +929,7 @@ static void delete_view( struct file_view *view ) /* [in] View */
     if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
     set_page_vprot( view->base, view->size, 0 );
     wine_rb_remove( &views_tree, &view->entry );
-    *(struct file_view **)view = next_free_view;
+    *(struct file_view ** HOSTPTR)view = next_free_view;
     next_free_view = view;
 }
 
@@ -1006,6 +1099,25 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
 }
 
 
+static void * HOSTPTR wine_mmap(void * HOSTPTR addr, size_t len, int prot, int flags, int fd, off_t offset)
+{
+#if defined(__APPLE__) && defined(__x86_64__)
+    // We use __x86_64__ and wine_needs_32on64() as a proxy for Catalina-and-later,
+    // where mapping files with execute permissions can make Gatekeeper prompt the
+    // user.
+    if (!(flags & MAP_ANON) && fd >= 0 && prot & PROT_EXEC && wine_needs_32on64())
+    {
+        void * HOSTPTR ret = mmap(addr, len, prot & ~PROT_EXEC, flags, fd, offset);
+
+        if (ret != MAP_FAILED_HOSTPTR && mprotect(ret, len, prot))
+            WARN("failed to mprotect region: %d\n", errno);
+        return ret;
+    }
+#endif
+    return mmap(addr, len, prot, flags, fd, offset);
+}
+
+
 /***********************************************************************
  *           VIRTUAL_SetProt
  *
@@ -1105,68 +1217,20 @@ static void reset_write_watches( void *base, SIZE_T size )
  *
  * Release the extra memory while keeping the range starting on the granularity boundary.
  */
-static inline void *unmap_extra_space( void *ptr, size_t total_size, size_t wanted_size, size_t mask )
+static inline void * HOSTPTR unmap_extra_space( void * HOSTPTR ptr, size_t total_size, size_t wanted_size, size_t mask )
 {
-    if ((ULONG_PTR)ptr & mask)
+    if ((ULONG_HOSTPTR)ptr & mask)
     {
-        size_t extra = mask + 1 - ((ULONG_PTR)ptr & mask);
+        size_t extra = mask + 1 - ((ULONG_HOSTPTR)ptr & mask);
         munmap( ptr, extra );
-        ptr = (char *)ptr + extra;
+        ptr = (char * HOSTPTR)ptr + extra;
         total_size -= extra;
     }
     if (total_size > wanted_size)
-        munmap( (char *)ptr + wanted_size, total_size - wanted_size );
+        munmap( (char * HOSTPTR)ptr + wanted_size, total_size - wanted_size );
     return ptr;
 }
 
-
-struct alloc_area
-{
-    size_t size;
-    size_t mask;
-    int    top_down;
-    void  *limit;
-    void  *result;
-};
-
-/***********************************************************************
- *           alloc_reserved_area_callback
- *
- * Try to map some space inside a reserved area. Callback for wine_mmap_enum_reserved_areas.
- */
-static int alloc_reserved_area_callback( void *start, size_t size, void *arg )
-{
-    struct alloc_area *alloc = arg;
-    void *end = (char *)start + size;
-
-    if (start < address_space_start) start = address_space_start;
-    if (is_beyond_limit( start, size, alloc->limit )) end = alloc->limit;
-    if (start >= end) return 0;
-
-    /* make sure we don't touch the preloader reserved range */
-    if (preload_reserve_end >= start)
-    {
-        if (preload_reserve_end >= end)
-        {
-            if (preload_reserve_start <= start) return 0;  /* no space in that area */
-            if (preload_reserve_start < end) end = preload_reserve_start;
-        }
-        else if (preload_reserve_start <= start) start = preload_reserve_end;
-        else
-        {
-            /* range is split in two by the preloader reservation, try first part */
-            if ((alloc->result = find_reserved_free_area( start, preload_reserve_start, alloc->size,
-                                                          alloc->mask, alloc->top_down )))
-                return 1;
-            /* then fall through to try second part */
-            start = preload_reserve_end;
-        }
-    }
-    if ((alloc->result = find_reserved_free_area( start, end, alloc->size, alloc->mask, alloc->top_down )))
-        return 1;
-
-    return 0;
-}
 
 /***********************************************************************
  *           map_fixed_area
@@ -1174,9 +1238,9 @@ static int alloc_reserved_area_callback( void *start, size_t size, void *arg )
  * mmap the fixed memory area.
  * The csVirtual section must be held by caller.
  */
-static NTSTATUS map_fixed_area( void *base, size_t size, unsigned int vprot )
+static NTSTATUS map_fixed_area( void * HOSTPTR base, size_t size, unsigned int vprot )
 {
-    void *ptr;
+    void * HOSTPTR ptr;
 
     switch (wine_mmap_is_in_reserved_area( base, size ))
     {
@@ -1189,7 +1253,7 @@ static NTSTATUS map_fixed_area( void *base, size_t size, unsigned int vprot )
         area.size = size;
         wine_mmap_enum_reserved_areas( get_area_boundary_callback, &area, 0 );
         assert( area.boundary );
-        lower_size = (char *)area.boundary - (char *)base;
+        lower_size = (char * HOSTPTR)area.boundary - (char * HOSTPTR)base;
         status = map_fixed_area( base, lower_size, vprot );
         if (status == STATUS_SUCCESS)
         {
@@ -1199,7 +1263,7 @@ static NTSTATUS map_fixed_area( void *base, size_t size, unsigned int vprot )
         return status;
     }
     case 0:  /* not in a reserved area, do a normal allocation */
-        if ((ptr = wine_anon_mmap( base, size, VIRTUAL_GetUnixProt(vprot), 0 )) == (void *)-1)
+        if ((ptr = wine_anon_mmap( base, size, VIRTUAL_GetUnixProt(vprot), 0 )) == MAP_FAILED_HOSTPTR)
         {
             if (errno == ENOMEM) return STATUS_NO_MEMORY;
             return STATUS_INVALID_PARAMETER;
@@ -1234,7 +1298,7 @@ static NTSTATUS map_fixed_area( void *base, size_t size, unsigned int vprot )
 static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size, size_t alignment,
                           int top_down, unsigned int vprot, unsigned short zero_bits_64 )
 {
-    void *ptr;
+    void * HOSTPTR ptr;
     NTSTATUS status;
     size_t mask = get_mask( alignment );
 
@@ -1259,7 +1323,7 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size, 
         if (wine_mmap_enum_reserved_areas( alloc_reserved_area_callback, &alloc, top_down ))
         {
             ptr = alloc.result;
-            TRACE( "got mem in reserved area %p-%p\n", ptr, (char *)ptr + size );
+            TRACE( "got mem in reserved area %p-%p\n", ptr, (char * HOSTPTR)ptr + size );
             if (wine_anon_mmap( ptr, size, VIRTUAL_GetUnixProt(vprot), MAP_FIXED ) != ptr)
                 return STATUS_INVALID_PARAMETER;
             goto done;
@@ -1269,18 +1333,18 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size, 
         {
             if (!(ptr = map_free_area( address_space_start, alloc.limit, size, mask, top_down, VIRTUAL_GetUnixProt(vprot) )))
                 return STATUS_NO_MEMORY;
-            TRACE( "got mem with map_free_area %p-%p\n", ptr, (char *)ptr + size );
+            TRACE( "got mem with map_free_area %p-%p\n", ptr, (char * HOSTPTR)ptr + size );
             goto done;
         }
 
         for (;;)
         {
-            if ((ptr = wine_anon_mmap( NULL, view_size, VIRTUAL_GetUnixProt(vprot), 0 )) == (void *)-1)
+            if ((ptr = wine_anon_mmap( NULL, view_size, VIRTUAL_GetUnixProt(vprot), 0 )) == MAP_FAILED_HOSTPTR)
             {
                 if (errno == ENOMEM) return STATUS_NO_MEMORY;
                 return STATUS_INVALID_PARAMETER;
             }
-            TRACE( "got mem with anon mmap %p-%p\n", ptr, (char *)ptr + size );
+            TRACE( "got mem with anon mmap %p-%p\n", ptr, (char * HOSTPTR)ptr + size );
             /* if we got something beyond the user limit, unmap it and retry */
             if (is_beyond_limit( ptr, view_size, user_space_limit )) add_reserved_area( ptr, view_size );
             else break;
@@ -1288,7 +1352,7 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size, 
         ptr = unmap_extra_space( ptr, view_size, size, mask );
     }
 done:
-    status = create_view( view_ret, ptr, size, vprot );
+    status = create_view( view_ret, ADDRSPACECAST(void *, ptr), size, vprot );
     if (status != STATUS_SUCCESS) unmap_area( ptr, size );
     return status;
 }
@@ -1303,7 +1367,7 @@ done:
 static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start, size_t size,
                                     off_t offset, unsigned int vprot, BOOL removable )
 {
-    void *ptr;
+    void * HOSTPTR ptr;
     int prot = VIRTUAL_GetUnixProt( vprot | VPROT_COMMITTED /* make sure it is accessible */ );
     unsigned int flags = MAP_FIXED | ((vprot & VPROT_WRITECOPY) ? MAP_PRIVATE : MAP_SHARED);
 
@@ -1320,7 +1384,8 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
     /* only try mmap if media is not removable (or if we require write access) */
     if (!removable || (flags & MAP_SHARED))
     {
-        if (mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != (void *)-1)
+try_again:
+        if (wine_mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != MAP_FAILED_HOSTPTR)
             goto done;
 
         switch (errno)
@@ -1340,7 +1405,16 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
         case EPERM:  /* noexec filesystem, fall back to read() */
             if (flags & MAP_SHARED)
             {
-                if (prot & PROT_EXEC) ERR( "failed to set PROT_EXEC on file map, noexec filesystem?\n" );
+                if (prot & PROT_EXEC)
+                {
+                    if (force_exec_prot && (vprot & (VPROT_WRITE|VPROT_EXEC)) == VPROT_WRITE)
+                    {
+                        /* exec + write may legitimately fail, in that case fall back to write only */
+                        prot &= ~PROT_EXEC;
+                        goto try_again;
+                    }
+                    ERR( "failed to set PROT_EXEC on file map, noexec filesystem?\n" );
+                }
                 return STATUS_ACCESS_DENIED;
             }
             if (prot & PROT_EXEC) WARN( "failed to set PROT_EXEC on file map, noexec filesystem?\n" );
@@ -1352,7 +1426,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
 
     /* Reserve the memory with an anonymous mmap */
     ptr = wine_anon_mmap( (char *)view->base + start, size, PROT_READ | PROT_WRITE, MAP_FIXED );
-    if (ptr == (void *)-1) return FILE_GetNtStatus();
+    if (ptr == MAP_FAILED_HOSTPTR) return FILE_GetNtStatus();
     /* Now read in the file */
     pread( fd, ptr, size, offset );
     if (prot != (PROT_READ|PROT_WRITE)) mprotect( ptr, size, prot );  /* Set the right protection */
@@ -1409,7 +1483,7 @@ static SIZE_T get_committed_size( struct file_view *view, void *base, BYTE *vpro
  */
 static NTSTATUS decommit_pages( struct file_view *view, size_t start, size_t size )
 {
-    if (wine_anon_mmap( (char *)view->base + start, size, PROT_NONE, MAP_FIXED ) != (void *)-1)
+    if (wine_anon_mmap( (char *)view->base + start, size, PROT_NONE, MAP_FIXED ) != MAP_FAILED_HOSTPTR)
     {
         set_page_vprot_bits( (char *)view->base + start, size, 0, VPROT_COMMITTED );
         return STATUS_SUCCESS;
@@ -1426,9 +1500,9 @@ static NTSTATUS decommit_pages( struct file_view *view, size_t start, size_t siz
 static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot )
 {
     size_t size;
-    void *addr = NULL;
+    void * HOSTPTR addr = NULL;
     void * const low_64k = (void *)0x10000;
-    const size_t dosmem_size = 0x110000;
+    const SIZE_T dosmem_size = 0x110000;
     int unix_prot = VIRTUAL_GetUnixProt( vprot );
 
     /* check for existing view */
@@ -1442,7 +1516,7 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
         addr = wine_anon_mmap( low_64k, dosmem_size - 0x10000, unix_prot, 0 );
         if (addr != low_64k)
         {
-            if (addr != (void *)-1) munmap( addr, dosmem_size - 0x10000 );
+            if (addr != MAP_FAILED_HOSTPTR) munmap( addr, dosmem_size - 0x10000 );
             return map_view( view, NULL, dosmem_size, 0, FALSE, vprot, 0 );
         }
     }
@@ -1463,7 +1537,7 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
         }
         else
         {
-            if (addr != (void *)-1) munmap( addr, 0x10000 - page_size );
+            if (addr != MAP_FAILED_HOSTPTR) munmap( addr, 0x10000 - page_size );
             addr = low_64k;
             TRACE( "failed to map low 64K range\n" );
         }
@@ -1471,9 +1545,9 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
 
     /* now reserve the whole range */
 
-    size = (char *)dosmem_size - (char *)addr;
+    size = (char *)dosmem_size - (char * HOSTPTR)addr;
     wine_anon_mmap( addr, size, unix_prot, MAP_FIXED );
-    return create_view( view, addr, size, vprot );
+    return create_view( view, ADDRSPACECAST(void *, addr), size, vprot );
 }
 
 
@@ -1488,7 +1562,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
 
     if (!*removable)
     {
-        if (mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != (void *)-1)
+        if (wine_mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != MAP_FAILED_HOSTPTR)
             return STATUS_SUCCESS;
 
         switch (errno)
@@ -1921,21 +1995,27 @@ done:
 
 struct alloc_virtual_heap
 {
-    void  *base;
+    void * HOSTPTR base;
     size_t size;
 };
 
 /* callback for wine_mmap_enum_reserved_areas to allocate space for the virtual heap */
-static int alloc_virtual_heap( void *base, size_t size, void *arg )
+static int alloc_virtual_heap( void * HOSTPTR base, size_t size, void * HOSTPTR arg )
 {
-    struct alloc_virtual_heap *alloc = arg;
+    struct alloc_virtual_heap * HOSTPTR alloc = arg;
 
-    if (is_beyond_limit( base, size, address_space_limit )) address_space_limit = (char *)base + size;
+    if (is_beyond_limit( base, size, address_space_limit ))
+    {
+        if (is_beyond_limit( base, size, address_space_hard_limit ))
+            address_space_limit = address_space_hard_limit;
+        else
+            address_space_limit = ADDRSPACECAST(char *, base) + size;
+    }
     if (size < alloc->size) return 0;
-    if (is_win64 && base < (void *)0x80000000) return 0;
-    alloc->base = wine_anon_mmap( (char *)base + size - alloc->size, alloc->size,
+    if (wine_is_64bit() && base < (void *)0x80000000) return 0;
+    alloc->base = wine_anon_mmap( (char * HOSTPTR)base + size - alloc->size, alloc->size,
                                   PROT_READ|PROT_WRITE, MAP_FIXED );
-    return (alloc->base != (void *)-1);
+    return (alloc->base != MAP_FAILED_HOSTPTR);
 }
 
 /***********************************************************************
@@ -1943,11 +2023,11 @@ static int alloc_virtual_heap( void *base, size_t size, void *arg )
  */
 void virtual_init(void)
 {
-    const char *preload;
+    const char * HOSTPTR preload;
     struct alloc_virtual_heap alloc_views;
     size_t size;
 
-#if !defined(__i386__) && !defined(__x86_64__) && !defined(__arm__) && !defined(__aarch64__)
+#if !defined(__i386__) && !defined(__x86_64__) && !defined(__i386_on_x86_64__) && !defined(__arm__) && !defined(__aarch64__)
     page_size = sysconf( _SC_PAGESIZE );
     page_mask = page_size - 1;
     /* Make sure we have a power of 2 */
@@ -1966,8 +2046,8 @@ void virtual_init(void)
         unsigned long start, end;
         if (sscanf( preload, "%lx-%lx", &start, &end ) == 2)
         {
-            preload_reserve_start = (void *)start;
-            preload_reserve_end = (void *)end;
+            preload_reserve_start = TRUNCCAST(void *, start);
+            preload_reserve_end = TRUNCCAST(void *, end);
             /* some apps start inside the DOS area */
             if (preload_reserve_start)
                 address_space_start = min( address_space_start, preload_reserve_start );
@@ -1986,10 +2066,10 @@ void virtual_init(void)
     else
         alloc_views.base = wine_anon_mmap( NULL, alloc_views.size, PROT_READ | PROT_WRITE, 0 );
 
-    assert( alloc_views.base != (void *)-1 );
+    assert( alloc_views.base != MAP_FAILED_HOSTPTR );
     view_block_start = alloc_views.base;
     view_block_end = view_block_start + view_block_size / sizeof(*view_block_start);
-    pages_vprot = (void *)((char *)alloc_views.base + view_block_size);
+    pages_vprot = (void * HOSTPTR)((char * HOSTPTR)alloc_views.base + view_block_size);
     wine_rb_init( &views_tree, compare_view );
 
     /* make the DOS area accessible (except the low 64K) to hide bugs in broken apps like Excel 2003 */
@@ -2203,13 +2283,20 @@ void WINAPI RtlFreeUserStack( void *stack )
 /***********************************************************************
  *           virtual_handle_fault
  */
-NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack )
+NTSTATUS virtual_handle_fault( const void * HOSTPTR addr, DWORD err, BOOL on_signal_stack )
 {
     NTSTATUS ret = STATUS_ACCESS_VIOLATION;
-    void *page = ROUND_ADDR( addr, page_mask );
+    void *page;
+    BOOL update_shared_data = FALSE;
     sigset_t sigset;
     BYTE vprot;
 
+#ifdef __i386_on_x86_64__
+    /* we can only handle faults in 32-bit space */
+    if ((ULONG_HOSTPTR)addr >> 32) return ret;
+#endif
+
+    page = ROUND_ADDR( TRUNCCAST( void *, addr ), page_mask );
     server_enter_uninterrupted_section( &csVirtual, &sigset );
     vprot = get_page_vprot( page );
     if (!on_signal_stack && (vprot & VPROT_GUARD))
@@ -2232,7 +2319,36 @@ NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack )
                 ret = STATUS_SUCCESS;
         }
     }
+    else if (!err && page == user_shared_data_external)
+    {
+        if (!(vprot & VPROT_READ))
+        {
+            set_page_vprot_bits( page, page_size, VPROT_READ | VPROT_WRITE, 0 );
+            mprotect_range( page, page_size, 0, 0 );
+            update_shared_data = TRUE;
+        }
+        /* ignore fault if page is readable now */
+        if (VIRTUAL_GetUnixProt( get_page_vprot( page )) & PROT_READ) ret = STATUS_SUCCESS;
+        else update_shared_data = FALSE;
+    }
+    else if (!err && (VIRTUAL_GetUnixProt( vprot ) & PROT_READ) && is_system_range( page, page_size ))
+    {
+        int unix_prot = VIRTUAL_GetUnixProt( vprot );
+        unsigned char vec;
+
+        mprotect_range( page, page_size, 0, 0 );
+        if (!mincore( page, page_size, &vec ) && (vec & 1))
+            ret = STATUS_SUCCESS;
+        else if (wine_anon_mmap( page, page_size, unix_prot, MAP_FIXED ) == page)
+            ret = STATUS_SUCCESS;
+        else
+            set_page_vprot_bits( page, page_size, 0, VPROT_READ | VPROT_EXEC );
+    }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
+
+    if (update_shared_data)
+        create_user_shared_data_thread();
+
     return ret;
 }
 
@@ -2339,7 +2455,7 @@ ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset )
 /***********************************************************************
  *           __wine_locked_recvmsg
  */
-ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags )
+ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr * WIN32PTR hdr, int flags )
 {
     sigset_t sigset;
     size_t i;
@@ -2351,7 +2467,7 @@ ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags )
 
     server_enter_uninterrupted_section( &csVirtual, &sigset );
     for (i = 0; i < hdr->msg_iovlen; i++)
-        if (check_write_access( hdr->msg_iov[i].iov_base, hdr->msg_iov[i].iov_len, &has_write_watch ))
+        if (check_write_access( ADDRSPACECAST(void *, hdr->msg_iov[i].iov_base), hdr->msg_iov[i].iov_len, &has_write_watch ))
             break;
     if (i == hdr->msg_iovlen)
     {
@@ -2359,7 +2475,7 @@ ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags )
         err = errno;
     }
     if (has_write_watch)
-        while (i--) update_write_watches( hdr->msg_iov[i].iov_base, hdr->msg_iov[i].iov_len, 0 );
+        while (i--) update_write_watches( ADDRSPACECAST(void *, hdr->msg_iov[i].iov_base), hdr->msg_iov[i].iov_len, 0 );
 
     server_leave_uninterrupted_section( &csVirtual, &sigset );
     errno = err;
@@ -2401,7 +2517,7 @@ int virtual_handle_stack_fault( void *addr )
     RtlEnterCriticalSection( &csVirtual );  /* no need for signal masking inside signal handler */
     if (get_page_vprot( addr ) & VPROT_GUARD)
     {
-        size_t guaranteed = max( NtCurrentTeb()->GuaranteedStackBytes, page_size * (is_win64 ? 2 : 1) );
+        size_t guaranteed = max( NtCurrentTeb()->GuaranteedStackBytes, page_size * (wine_is_64bit() ? 2 : 1) );
         char *page = ROUND_ADDR( addr, page_mask );
         set_page_vprot_bits( page, page_size, 0, VPROT_GUARD );
         mprotect_range( page, page_size, 0, 0 );
@@ -2464,14 +2580,14 @@ BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size )
  *
  * Check if a memory buffer can be written to, triggering page faults if needed for write watches.
  */
-BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size )
+BOOL virtual_check_buffer_for_write( void * HOSTPTR ptr, SIZE_T size )
 {
     if (!size) return TRUE;
     if (!ptr) return FALSE;
 
     __TRY
     {
-        volatile char *p = ptr;
+        volatile char * HOSTPTR p = ptr;
         SIZE_T count = size;
 
         while (count > page_size)
@@ -2590,18 +2706,19 @@ struct free_range
 };
 
 /* free reserved areas above the limit; callback for wine_mmap_enum_reserved_areas */
-static int free_reserved_memory( void *base, size_t size, void *arg )
+static int free_reserved_memory( void * HOSTPTR start, size_t size, void * HOSTPTR arg )
 {
-    struct free_range *range = arg;
+    struct free_range * HOSTPTR range = arg;
+    char * HOSTPTR base = (char * HOSTPTR)start;
 
-    if ((char *)base >= range->limit) return 0;
-    if ((char *)base + size <= range->base) return 0;
-    if ((char *)base < range->base)
+    if (base >= range->limit) return 0;
+    if (base + size <= range->base) return 0;
+    if (base < range->base)
     {
-        size -= range->base - (char *)base;
+        size -= range->base - base;
         base = range->base;
     }
-    if ((char *)base + size > range->limit) size = range->limit - (char *)base;
+    if (base + size > range->limit) size = range->limit - base;
     remove_reserved_area( base, size );
     return 1;  /* stop enumeration since the list has changed */
 }
@@ -2616,7 +2733,7 @@ void virtual_release_address_space(void)
     struct free_range range;
     sigset_t sigset;
 
-    if (is_win64) return;
+    if (wine_is_64bit()) return;
 
     server_enter_uninterrupted_section( &csVirtual, &sigset );
 
@@ -2636,6 +2753,19 @@ void virtual_release_address_space(void)
     else
         range.base = (char *)0x20000000;
 
+#ifdef __APPLE__ /* CrossOver Hack #16371 */
+    {
+        char buf[1024], *p;
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0)
+        {
+            if ((p = strrchr(buf, '/'))) ++p;
+            else p = buf;
+            if (!strcasestr(p, "preloader"))
+                range.base  = (char *)0x40001000;
+        }
+    }
+#endif
     if (range.base)
     {
         range.limit = (char *)0x7f000000;
@@ -2678,7 +2808,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
 
     if (!size) return STATUS_INVALID_PARAMETER;
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
-    if (!is_win64 && !is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
+    if (!wine_is_64bit() && !is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
 
     if (process != NtCurrentProcess())
     {
@@ -2976,16 +3106,16 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH NtProtectVirtualMemory( HANDLE process, PVOID 
 
 
 /* retrieve state for a free memory area; callback for wine_mmap_enum_reserved_areas */
-static int get_free_mem_state_callback( void *start, size_t size, void *arg )
+static int get_free_mem_state_callback( void * HOSTPTR start, size_t size, void * HOSTPTR arg )
 {
-    MEMORY_BASIC_INFORMATION *info = arg;
-    void *end = (char *)start + size;
+    MEMORY_BASIC_INFORMATION * HOSTPTR info = arg;
+    void * HOSTPTR end = (char * HOSTPTR)start + size;
 
-    if ((char *)info->BaseAddress + info->RegionSize <= (char *)start) return 0;
+    if ((char *)info->BaseAddress + info->RegionSize <= (char * HOSTPTR)start) return 0;
 
     if (info->BaseAddress >= end)
     {
-        if (info->AllocationBase < end) info->AllocationBase = end;
+        if (info->AllocationBase < end) info->AllocationBase = ADDRSPACECAST(void *, end);
         return 0;
     }
 
@@ -2997,12 +3127,12 @@ static int get_free_mem_state_callback( void *start, size_t size, void *arg )
         info->AllocationBase    = 0;
         info->AllocationProtect = 0;
         info->Type              = 0;
-        if ((char *)info->BaseAddress + info->RegionSize > (char *)end)
-            info->RegionSize = (char *)end - (char *)info->BaseAddress;
+        if ((char *)info->BaseAddress + info->RegionSize > (char * HOSTPTR)end)
+            info->RegionSize = (char * HOSTPTR)end - (char *)info->BaseAddress;
     }
     else /* outside of the reserved area, pretend it's allocated */
     {
-        info->RegionSize        = (char *)start - (char *)info->BaseAddress;
+        info->RegionSize        = (char * HOSTPTR)start - (char *)info->BaseAddress;
         info->State             = MEM_RESERVE;
         info->Protect           = PAGE_NOACCESS;
         info->AllocationProtect = PAGE_NOACCESS;
@@ -3117,7 +3247,7 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
         if (!wine_mmap_enum_reserved_areas( get_free_mem_state_callback, info, 0 ))
         {
             /* not in a reserved area at all, pretend it's allocated */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
             if (base >= (char *)address_space_start)
             {
                 info->State             = MEM_RESERVE;
@@ -3317,7 +3447,7 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
     /* Check parameters */
     if (zero_bits > 21 && zero_bits < 32)
         return STATUS_INVALID_PARAMETER_4;
-    if (!is_win64 && !is_wow64 && zero_bits >= 32)
+    if (!wine_is_64bit() && !is_wow64 && zero_bits >= 32)
         return STATUS_INVALID_PARAMETER_4;
 
     /* If both addr_ptr and zero_bits are passed, they have match */
@@ -3633,8 +3763,11 @@ NTSTATUS WINAPI NtResetWriteWatch( HANDLE process, PVOID base, SIZE_T size )
  *             NtReadVirtualMemory   (NTDLL.@)
  *             ZwReadVirtualMemory   (NTDLL.@)
  */
-NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buffer,
-                                     SIZE_T size, SIZE_T *bytes_read )
+NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void * HOSTPTR addr, void *buffer,
+                                     SIZE_T size, SIZE_T * HOSTPTR bytes_read )
+#ifdef __i386_on_x86_64__
+__attribute__((overloadable))
+#endif
 {
     NTSTATUS status;
 
@@ -3658,13 +3791,24 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
     return status;
 }
 
+#ifdef __i386_on_x86_64__
+NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buffer,
+                                     SIZE_T size, SIZE_T *bytes_read )
+{
+    return NtReadVirtualMemory(process, (const void *HOSTPTR)addr, buffer, size, bytes_read);
+}
+#endif
+
 
 /***********************************************************************
  *             NtWriteVirtualMemory   (NTDLL.@)
  *             ZwWriteVirtualMemory   (NTDLL.@)
  */
-NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *buffer,
+NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void * HOSTPTR addr, const void *buffer,
                                       SIZE_T size, SIZE_T *bytes_written )
+#ifdef __i386_on_x86_64__
+__attribute__((overloadable))
+#endif
 {
     NTSTATUS status;
 
@@ -3687,6 +3831,14 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
     if (bytes_written) *bytes_written = size;
     return status;
 }
+
+#ifdef __i386_on_x86_64__
+NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *buffer,
+                                      SIZE_T size, SIZE_T *bytes_written )
+{
+    return NtWriteVirtualMemory(process, (void * HOSTPTR)addr, buffer, size, bytes_written);
+}
+#endif
 
 
 /***********************************************************************

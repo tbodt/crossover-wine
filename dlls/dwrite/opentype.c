@@ -2362,10 +2362,10 @@ HRESULT opentype_get_cpal_entries(const struct dwrite_fonttable *cpal, unsigned 
     return S_OK;
 }
 
-static int colr_compare_gid(const void *g, const void *r)
+static int colr_compare_gid(const void * HOSTPTR g, const void * HOSTPTR r)
 {
-    const struct colr_baseglyph_record *record = r;
-    UINT16 glyph = *(UINT16*)g, GID = GET_BE_WORD(record->glyph);
+    const struct colr_baseglyph_record * HOSTPTR record = r;
+    UINT16 glyph = *(UINT16* HOSTPTR)g, GID = GET_BE_WORD(record->glyph);
     int ret = 0;
 
     if (glyph > GID)
@@ -2379,7 +2379,7 @@ static int colr_compare_gid(const void *g, const void *r)
 HRESULT opentype_get_colr_glyph(const struct dwrite_fonttable *colr, UINT16 glyph, struct dwrite_colorglyph *ret)
 {
     unsigned int num_baseglyph_records, offset_baseglyph_records;
-    const struct colr_baseglyph_record *record;
+    const struct colr_baseglyph_record * HOSTPTR record;
     const struct colr_layer_record *layer;
     const struct colr_header *header;
 
@@ -2781,10 +2781,10 @@ DWORD opentype_layout_find_language(const struct scriptshaping_cache *cache, DWO
     return 0;
 }
 
-static int gdef_class_compare_format2(const void *g, const void *r)
+static int gdef_class_compare_format2(const void * HOSTPTR g, const void * HOSTPTR r)
 {
-    const struct ot_gdef_class_range *range = r;
-    UINT16 glyph = *(UINT16 *)g;
+    const struct ot_gdef_class_range * HOSTPTR range = r;
+    UINT16 glyph = *(UINT16 * HOSTPTR)g;
 
     if (glyph < GET_BE_WORD(range->start_glyph))
         return -1;
@@ -2825,7 +2825,7 @@ static unsigned int opentype_layout_get_glyph_class(const struct dwrite_fonttabl
         format2 = table_read_ensure(table, offset, FIELD_OFFSET(struct ot_gdef_classdef_format2, ranges[count]));
         if (format2)
         {
-            const struct ot_gdef_class_range *range = bsearch(&glyph, format2->ranges, count,
+            const struct ot_gdef_class_range * HOSTPTR range = bsearch(&glyph, format2->ranges, count,
                     sizeof(struct ot_gdef_class_range), gdef_class_compare_format2);
             glyph_class = range && glyph <= GET_BE_WORD(range->end_glyph) ?
                     GET_BE_WORD(range->glyph_class) : GDEF_CLASS_UNCLASSIFIED;
@@ -2846,23 +2846,23 @@ struct coverage_compare_format1_context
     unsigned int *coverage_index;
 };
 
-static int coverage_compare_format1(const void *left, const void *right)
+static int coverage_compare_format1(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    const struct coverage_compare_format1_context *context = left;
-    UINT16 glyph = GET_BE_WORD(*(UINT16 *)right);
+    const struct coverage_compare_format1_context * HOSTPTR context = left;
+    UINT16 glyph = GET_BE_WORD(*(UINT16 * HOSTPTR)right);
     int ret;
 
     ret = context->glyph - glyph;
     if (!ret)
-        *context->coverage_index = (UINT16 *)right - context->table_base;
+        *context->coverage_index = (UINT16 * HOSTPTR)right - context->table_base;
 
     return ret;
 }
 
-static int coverage_compare_format2(const void *g, const void *r)
+static int coverage_compare_format2(const void * HOSTPTR g, const void * HOSTPTR r)
 {
-    const struct ot_coverage_range *range = r;
-    UINT16 glyph = *(UINT16 *)g;
+    const struct ot_coverage_range * HOSTPTR range = r;
+    UINT16 glyph = *(UINT16 * HOSTPTR)g;
 
     if (glyph < GET_BE_WORD(range->start_glyph))
         return -1;
@@ -2903,7 +2903,7 @@ static unsigned int opentype_layout_is_glyph_covered(const struct dwrite_fonttab
                 FIELD_OFFSET(struct ot_coverage_format2, ranges[count]));
         if (format2)
         {
-            const struct ot_coverage_range *range = bsearch(&glyph, format2->ranges, count,
+            const struct ot_coverage_range * HOSTPTR range = bsearch(&glyph, format2->ranges, count,
                     sizeof(struct ot_coverage_range), coverage_compare_format2);
             return range && glyph <= GET_BE_WORD(range->end_glyph) ?
                     GET_BE_WORD(range->startcoverage_index) + glyph - GET_BE_WORD(range->start_glyph) :
@@ -2969,7 +2969,7 @@ static int opentype_layout_gpos_get_dev_value(const struct scriptshaping_context
 }
 
 static void opentype_layout_apply_gpos_value(struct scriptshaping_context *context, unsigned int table_offset,
-        WORD value_format, const WORD *values, unsigned int glyph)
+        WORD value_format, const WORD * HOSTPTR values, unsigned int glyph)
 {
     const struct scriptshaping_cache *cache = context->cache;
     DWRITE_GLYPH_OFFSET *offset = &context->offsets[glyph];
@@ -3162,11 +3162,11 @@ static BOOL opentype_layout_apply_gpos_single_adjustment(struct scriptshaping_co
     return FALSE;
 }
 
-static int gpos_pair_adjustment_compare_format1(const void *g, const void *r)
+static int gpos_pair_adjustment_compare_format1(const void * HOSTPTR g, const void * HOSTPTR r)
 {
-    const struct ot_gpos_pairvalue *pairvalue = r;
+    const struct ot_gpos_pairvalue * HOSTPTR pairvalue = r;
     UINT16 second_glyph = GET_BE_WORD(pairvalue->second_glyph);
-    return *(UINT16 *)g - second_glyph;
+    return *(UINT16 * HOSTPTR)g - second_glyph;
 }
 
 static BOOL opentype_layout_apply_gpos_pair_adjustment(struct scriptshaping_context *context,
@@ -3217,7 +3217,7 @@ static BOOL opentype_layout_apply_gpos_pair_adjustment(struct scriptshaping_cont
                     FIELD_OFFSET(struct ot_gpos_pairpos_format1, pairset_count));
             unsigned int pairvalue_len, pairset_offset;
             const struct ot_gpos_pairset *pairset;
-            const WORD *pairvalue;
+            const WORD * HOSTPTR pairvalue;
             WORD pairvalue_count;
 
             if (!pairset_count || coverage_index >= pairset_count)
@@ -3789,9 +3789,9 @@ struct lookups
     size_t count;
 };
 
-static int lookups_sorting_compare(const void *left, const void *right)
+static int lookups_sorting_compare(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    return *(int *)left - *(int *)right;
+    return *(int * HOSTPTR)left - *(int * HOSTPTR)right;
 };
 
 void opentype_layout_apply_gpos_features(struct scriptshaping_context *context,

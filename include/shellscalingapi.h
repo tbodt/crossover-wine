@@ -19,6 +19,8 @@
 #ifndef __WINE_SHELLSCALINGAPI_H
 #define __WINE_SHELLSCALINGAPI_H
 
+#include "wine/winheader_enter.h"
+
 #include <shtypes.h>
 
 typedef enum MONITOR_DPI_TYPE
@@ -40,5 +42,7 @@ HRESULT WINAPI GetDpiForMonitor(HMONITOR,MONITOR_DPI_TYPE,UINT*,UINT*);
 HRESULT WINAPI GetProcessDpiAwareness(HANDLE,PROCESS_DPI_AWARENESS*);
 HRESULT WINAPI GetScaleFactorForMonitor(HMONITOR,DEVICE_SCALE_FACTOR*);
 HRESULT WINAPI SetProcessDpiAwareness(PROCESS_DPI_AWARENESS);
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SHELLSCALINGAPI_H */

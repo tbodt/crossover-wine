@@ -21,6 +21,8 @@
 #ifndef __WINE_WINCRYPT_H
 #define __WINE_WINCRYPT_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1108,7 +1110,7 @@ typedef BOOL (WINAPI *PFN_CERT_ENUM_PHYSICAL_STORE)(const void *pvSystemStore,
  void *pvReserved, void *pvArg);
 
 /* Encode/decode object */
-typedef LPVOID (__WINE_ALLOC_SIZE(1) WINAPI *PFN_CRYPT_ALLOC)(size_t cbsize);
+typedef LPVOID (__WINE_ALLOC_SIZE(1) WINAPI *PFN_CRYPT_ALLOC)(SIZE_T cbsize);
 typedef VOID   (WINAPI *PFN_CRYPT_FREE)(LPVOID pv);
 
 typedef struct _CRYPT_ENCODE_PARA {
@@ -3788,7 +3790,7 @@ typedef struct _CMSG_CMS_RECIPIENT_INFO {
 #define CMSG_KEY_AGREE_VERSION          CMSG_ENVELOPED_RECIPIENT_V3
 #define CMSG_MAIL_LIST_VERSION          CMSG_ENVELOPED_RECIPIENT_V4
 
-typedef void * (WINAPI *PFN_CMSG_ALLOC)(size_t cb);
+typedef void * (WINAPI *PFN_CMSG_ALLOC)(SIZE_T cb);
 typedef void   (WINAPI *PFN_CMSG_FREE)(void *pv);
 
 typedef struct _CMSG_CONTENT_ENCRYPT_INFO {
@@ -4591,5 +4593,7 @@ HRESULT WINAPI FindCertsByIssuer(PCERT_CHAIN pCertChains, DWORD *pcbCertChains,
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

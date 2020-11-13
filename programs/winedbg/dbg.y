@@ -1,3 +1,7 @@
+%code top{
+#define YYMALLOC heap_alloc
+#define YYFREE heap_free
+}
 %{
 /*
  * Parser for command lines in the Wine debugger
@@ -30,6 +34,7 @@
 
 #include "debugger.h"
 #include "wine/exception.h"
+#include "wine/heap.h"
 #include "expr.h"
 
 int dbg_lex(void);

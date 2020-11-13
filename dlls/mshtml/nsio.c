@@ -2744,6 +2744,16 @@ static nsresult NSAPI nsURI_SchemeIs(nsIFileURL *iface, const char *scheme, cpp_
 
     MultiByteToWideChar(CP_UTF8, 0, scheme, -1, buf, ARRAY_SIZE(buf));
     *_retval = !wcscmp(scheme_name, buf);
+
+    /* CXHACK: We cheat security check for posting data from secure to insecure location for STO. See bug 7867 */
+    if(!*_retval && !strcmp(scheme, "https")) {
+        static const WCHAR appW[] = {'a','p','p',0};
+        if(!wcscmp(scheme_name, appW)) {
+            FIXME("CXHACK: https -> app post\n");
+            *_retval = TRUE;
+        }
+    }
+
     SysFreeString(scheme_name);
     return NS_OK;
 }

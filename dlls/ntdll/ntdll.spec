@@ -157,7 +157,7 @@
 @ stdcall NtCompleteConnectPort(ptr)
 # @ stub NtCompressKey
 @ stdcall NtConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr)
-@ stub NtContinue
+@ stdcall NtContinue(ptr long)
 # @ stub NtCreateDebugObject
 @ stdcall NtCreateDirectoryObject(ptr long ptr)
 @ stdcall NtCreateEvent(ptr long ptr long long)
@@ -182,12 +182,12 @@
 @ stdcall NtCreateSection(ptr long ptr ptr long long long)
 @ stdcall NtCreateSemaphore(ptr long ptr long long)
 @ stdcall NtCreateSymbolicLinkObject(ptr long ptr ptr)
-@ stub NtCreateThread
+@ stdcall NtCreateThread(ptr long ptr long ptr ptr ptr long)
 @ stdcall NtCreateThreadEx(ptr long ptr long ptr ptr long long long long ptr)
 @ stdcall NtCreateTimer(ptr long ptr long)
 @ stub NtCreateToken
 # @ stub NtCreateWaitablePort
-@ stdcall -arch=win32,arm64 NtCurrentTeb()
+@ stdcall -arch=win32,arm64 NtCurrentTeb() NTDLL_NtCurrentTeb
 # @ stub NtDebugActiveProcess
 # @ stub NtDebugContinue
 @ stdcall NtDelayExecution(long ptr)
@@ -329,6 +329,7 @@
 @ stdcall NtReadFileScatter(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtReadRequestData
 @ stdcall NtReadVirtualMemory(long ptr ptr long ptr)
+@ stdcall -arch=x86_32on64 wine_NtReadVirtualMemory_HOSTPTR(long int64 ptr long int64)
 @ stub NtRegisterNewDevice
 @ stdcall NtRegisterThreadTerminatePort(ptr)
 @ stdcall NtReleaseKeyedEvent(long ptr long ptr)
@@ -430,6 +431,7 @@
 @ stdcall NtWriteFileGather(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtWriteRequestData
 @ stdcall NtWriteVirtualMemory(long ptr ptr long ptr)
+@ stdcall -arch=x86_32on64 wine_NtWriteVirtualMemory_HOSTPTR(long int64 ptr long ptr)
 @ stdcall NtYieldExecution()
 @ stub PfxFindPrefix
 @ stub PfxInitialize
@@ -1090,6 +1092,7 @@
 @ stdcall WinSqmIsOptedIn()
 @ stdcall WinSqmSetDWORD(ptr long long)
 @ stdcall WinSqmStartSession(ptr long long)
+@ extern Wow64Transition
 @ stdcall -private ZwAcceptConnectPort(ptr long ptr long ptr ptr) NtAcceptConnectPort
 @ stdcall -private ZwAccessCheck(ptr long long ptr ptr ptr ptr ptr) NtAccessCheck
 @ stdcall -private ZwAccessCheckAndAuditAlarm(ptr long ptr ptr ptr long ptr long ptr ptr ptr) NtAccessCheckAndAuditAlarm
@@ -1124,7 +1127,7 @@
 @ stdcall -private ZwCompleteConnectPort(ptr) NtCompleteConnectPort
 # @ stub ZwCompressKey
 @ stdcall -private ZwConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr) NtConnectPort
-@ stub ZwContinue
+@ stdcall -private ZwContinue(ptr long) NtContinue
 # @ stub ZwCreateDebugObject
 @ stdcall -private ZwCreateDirectoryObject(ptr long ptr) NtCreateDirectoryObject
 @ stdcall -private ZwCreateEvent(ptr long ptr long long) NtCreateEvent
@@ -1545,6 +1548,8 @@
 # All functions must be prefixed with '__wine_' (for internal functions)
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
+@ cdecl __wine_esync_set_queue_fd(long)
+
 # Server interface
 @ cdecl -norelay wine_server_call(ptr)
 @ cdecl wine_server_fd_to_handle(long long long ptr)
@@ -1558,6 +1563,11 @@
 @ cdecl -norelay __wine_dbg_header(long long str)
 @ cdecl -norelay __wine_dbg_output(str)
 @ cdecl -norelay __wine_dbg_strdup(str)
+
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_get_channel_flags_HOSTPTR(int64)
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_header_HOSTPTR(long int64 int64)
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_output_HOSTPTR(int64)
+@ cdecl -norelay -arch=x86_32on64 -ret64 __wine_dbg_strdup_HOSTPTR(int64)
 
 # Virtual memory
 @ cdecl __wine_locked_recvmsg(long ptr long)
@@ -1576,3 +1586,15 @@
 # Filesystem
 @ cdecl wine_nt_to_unix_file_name(ptr ptr long long)
 @ cdecl wine_unix_to_nt_file_name(ptr ptr)
+
+# User shared data
+@ cdecl __wine_user_shared_data()
+
+# hack
+@ stdcall rpc_NtReadFile(long long ptr ptr ptr ptr long ptr ptr)
+
+# Loader
+@ cdecl -arch=x86_32on64 __wine_get_extra_proc(ptr ptr)
+@ cdecl -arch=x86_32on64 __wine_is_module_hybrid(ptr)
+
+@ cdecl -arch=x86_32on64 wine_strnicmp_HOSTPTR(int64 int64 long)

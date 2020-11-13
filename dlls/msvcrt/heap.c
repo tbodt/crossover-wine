@@ -33,8 +33,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #define UNLOCK_HEAP _munlock( _HEAP_LOCK )
 
 /* _aligned */
-#define SAVED_PTR(x) ((void *)((DWORD_PTR)((char *)x - sizeof(void *)) & \
-                               ~(sizeof(void *) - 1)))
+#define SAVED_PTR(x) TRUNCCAST(void *, (DWORD_PTR)((char *)x - sizeof(void *)) & \
+                               ~(sizeof(void *) - 1))
 #define ALIGN_PTR(ptr, alignment, offset) ((void *) \
     ((((DWORD_PTR)((char *)ptr + alignment + sizeof(void *) + offset)) & \
       ~(alignment - 1)) - offset))
@@ -441,7 +441,26 @@ void CDECL _free_base(void* ptr)
  */
 void* CDECL MSVCRT_malloc(MSVCRT_size_t size)
 {
-  void *ret = msvcrt_heap_alloc(0, size);
+  void *ret;
+
+  /* Hack for SAP GUI bug (bug 15831) */
+#if _MSVCR_VER == 110
+  static int is_sap = -1;
+
+  if (is_sap == -1)
+  {
+    char name[MAX_PATH], *p;
+
+    GetModuleFileNameA(GetModuleHandleA(NULL), name, MAX_PATH);
+    p = strrchr(name,'\\');
+    p = (p ? p+1 : name);
+    is_sap = !strcasecmp(p, "saplogon.exe");
+  }
+
+  if (is_sap) size += 4;
+#endif
+
+  ret = msvcrt_heap_alloc(0, size);
   if (!ret)
       *MSVCRT__errno() = MSVCRT_ENOMEM;
   return ret;

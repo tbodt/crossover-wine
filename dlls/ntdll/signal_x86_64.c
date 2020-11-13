@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 
 #include "config.h"
 #include "wine/port.h"
@@ -354,6 +354,8 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
     SS_sig(sigcontext) = context->SegSs;
 #endif
 }
+
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
 
 /***********************************************************************
@@ -1524,7 +1526,13 @@ static NTSTATUS libunwind_virtual_unwind( ULONG64 ip, BOOL* got_info, ULONG64 *f
            ip, (unsigned long)info.start_ip, (unsigned long)info.end_ip, (unsigned long)info.handler,
            (unsigned long)info.lsda, (unsigned long)info.unwind_info );
 
-    if (!(rc = unw_step( &cursor )))
+    if (!(rc = unw_step( &cursor ))
+#ifdef __APPLE__
+        /* Apple's libunwind returns 0 here not only if there's no info to make the step,
+         * but also when it can't find info for the parent frame. Just ignore this case. */
+        && !info.format
+#endif
+        )
     {
         WARN( "last frame\n" );
         *got_info = FALSE;
@@ -3133,6 +3141,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -3242,6 +3251,9 @@ void signal_init_thread( TEB *teb )
     __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
                       :
                       : "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
+                      :
+                      : "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
 
     /* alloc_tls_slot() needs to poke a value to an address relative to each
        thread's gsbase.  Have each thread record its gsbase pointer into its
@@ -4244,6 +4256,20 @@ PCONTEXT DECLSPEC_HIDDEN attach_thread( LPTHREAD_START_ROUTINE entry, void *arg,
  */
 void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend )
 {
+#ifdef __APPLE__
+    TEB *teb = NtCurrentTeb();
+
+    /* Preallocate TlsExpansionSlots for secondary threads.  Otherwise, kernelbase will
+       allocate it on demand, but won't be able to do the Mac-specific poking to the
+       %gs-relative address. */
+    if (!teb->TlsExpansionSlots)
+        teb->TlsExpansionSlots = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                                  8 * sizeof(teb->Peb->TlsExpansionBitmapBits) * sizeof(void*) );
+    __asm__ volatile ("movq %0,%%gs:%c1"
+                      :
+                      : "r" (teb->TlsExpansionSlots), "n" (FIELD_OFFSET(TEB, TlsExpansionSlots)));
+#endif
+
     start_thread( entry, arg, suspend, call_thread_func );
 }
 
@@ -4288,4 +4314,4 @@ __ASM_STDCALL_FUNC( DbgBreakPoint, 0, "int $3; ret")
  */
 __ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret")
 
-#endif  /* __x86_64__ */
+#endif  /* __x86_64__ && !__i386_on_x86_64__ */

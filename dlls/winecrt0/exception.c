@@ -62,6 +62,81 @@ __ASM_GLOBAL_FUNC( __wine_rtl_unwind,
                    "call " __ASM_STDCALL("RtlUnwind",16) "\n\t"
                    "call *16(%ebp)" )
 
+#elif defined(__i386_on_x86_64__)
+
+__ASM_GLOBAL_FUNC( __wine_setjmpex,
+                   "movl " __ASM_EXTRA_DIST "+4(%rsp),%ecx\n\t"   /* jmp_buf */
+                   "movl " __ASM_EXTRA_DIST "+8(%rsp),%edx\n\t"   /* frame */
+                   "movq %rdx,(%rcx)\n\t"          /* jmp_buf->Frame */
+                   "movq %rbx,0x8(%rcx)\n\t"       /* jmp_buf->Rbx */
+                   "leaq 0x8(%rsp),%rax\n\t"
+                   "movq %rax,0x10(%rcx)\n\t"      /* jmp_buf->Rsp */
+                   "movq %rbp,0x18(%rcx)\n\t"      /* jmp_buf->Rbp */
+                   "movq %rsi,0x20(%rcx)\n\t"      /* jmp_buf->Rsi */
+                   "movq %rdi,0x28(%rcx)\n\t"      /* jmp_buf->Rdi */
+                   "movq %r12,0x30(%rcx)\n\t"      /* jmp_buf->R12 */
+                   "movq %r13,0x38(%rcx)\n\t"      /* jmp_buf->R13 */
+                   "movq %r14,0x40(%rcx)\n\t"      /* jmp_buf->R14 */
+                   "movq %r15,0x48(%rcx)\n\t"      /* jmp_buf->R15 */
+                   "movq (%rsp),%rax\n\t"
+                   "movq %rax,0x50(%rcx)\n\t"      /* jmp_buf->Rip */
+                   "movdqa %xmm6,0x60(%rcx)\n\t"   /* jmp_buf->Xmm6 */
+                   "movdqa %xmm7,0x70(%rcx)\n\t"   /* jmp_buf->Xmm7 */
+                   "movdqa %xmm8,0x80(%rcx)\n\t"   /* jmp_buf->Xmm8 */
+                   "movdqa %xmm9,0x90(%rcx)\n\t"   /* jmp_buf->Xmm9 */
+                   "movdqa %xmm10,0xa0(%rcx)\n\t"  /* jmp_buf->Xmm10 */
+                   "movdqa %xmm11,0xb0(%rcx)\n\t"  /* jmp_buf->Xmm11 */
+                   "movdqa %xmm12,0xc0(%rcx)\n\t"  /* jmp_buf->Xmm12 */
+                   "movdqa %xmm13,0xd0(%rcx)\n\t"  /* jmp_buf->Xmm13 */
+                   "movdqa %xmm14,0xe0(%rcx)\n\t"  /* jmp_buf->Xmm14 */
+                   "movdqa %xmm15,0xf0(%rcx)\n\t"  /* jmp_buf->Xmm15 */
+                   "xorq %rax,%rax\n\t"
+                   "retq" )
+
+__ASM_GLOBAL_FUNC( __wine_longjmp,
+                   "movl " __ASM_EXTRA_DIST "+4(%esp),%ecx\n\t"   /* jmp_buf */
+                   "movl " __ASM_EXTRA_DIST "+8(%esp),%eax\n\t"   /* retval */
+                   "movq 0x8(%rcx),%rbx\n\t"       /* jmp_buf->Rbx */
+                   "movq 0x18(%rcx),%rbp\n\t"      /* jmp_buf->Rbp */
+                   "movq 0x20(%rcx),%rsi\n\t"      /* jmp_buf->Rsi */
+                   "movq 0x28(%rcx),%rdi\n\t"      /* jmp_buf->Rdi */
+                   "movq 0x30(%rcx),%r12\n\t"      /* jmp_buf->R12 */
+                   "movq 0x38(%rcx),%r13\n\t"      /* jmp_buf->R13 */
+                   "movq 0x40(%rcx),%r14\n\t"      /* jmp_buf->R14 */
+                   "movq 0x48(%rcx),%r15\n\t"      /* jmp_buf->R15 */
+                   "movdqa 0x60(%rcx),%xmm6\n\t"   /* jmp_buf->Xmm6 */
+                   "movdqa 0x70(%rcx),%xmm7\n\t"   /* jmp_buf->Xmm7 */
+                   "movdqa 0x80(%rcx),%xmm8\n\t"   /* jmp_buf->Xmm8 */
+                   "movdqa 0x90(%rcx),%xmm9\n\t"   /* jmp_buf->Xmm9 */
+                   "movdqa 0xa0(%rcx),%xmm10\n\t"  /* jmp_buf->Xmm10 */
+                   "movdqa 0xb0(%rcx),%xmm11\n\t"  /* jmp_buf->Xmm11 */
+                   "movdqa 0xc0(%rcx),%xmm12\n\t"  /* jmp_buf->Xmm12 */
+                   "movdqa 0xd0(%rcx),%xmm13\n\t"  /* jmp_buf->Xmm13 */
+                   "movdqa 0xe0(%rcx),%xmm14\n\t"  /* jmp_buf->Xmm14 */
+                   "movdqa 0xf0(%rcx),%xmm15\n\t"  /* jmp_buf->Xmm15 */
+                   "movq 0x50(%rcx),%rdx\n\t"      /* jmp_buf->Rip */
+                   "movq 0x10(%rcx),%rsp\n\t"      /* jmp_buf->Rsp */
+                   "jmp *%rdx" )
+
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(__wine_rtl_unwind),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "subl $8,%esp\n\t"
+                     "pushl $0\n\t"       /* retval */
+                     "pushl 12(%ebp)\n\t" /* record */
+                     "pushl 16(%ebp)\n\t" /* target */
+                     "pushl 8(%ebp)\n\t"  /* frame */
+                     "call " __ASM_THUNK_SYMBOL("RtlUnwind") "\n\t"
+                     "call *16(%ebp)" )
+void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
+                                void (__cdecl *target)(void) )
+{
+    WINE_CALL_IMPL32(__wine_rtl_unwind)( frame, record, target );
+}
+
 #elif defined(__GNUC__) && defined(__x86_64__)
 
 __ASM_GLOBAL_FUNC( __wine_setjmpex,
@@ -190,7 +265,7 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
                    "bx r2" )
 
 void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                                void (*target)(void) )
+                                void (__cdecl *target)(void) )
 {
     RtlUnwind( frame, target, record, 0 );
     for (;;) target();
@@ -240,7 +315,7 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
                    "ret" )
 
 void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                                void (*target)(void) )
+                                void (__cdecl *target)(void) )
 {
     RtlUnwind( frame, target, record, 0 );
     for (;;) target();
@@ -259,7 +334,7 @@ void __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval )
 }
 
 void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                                void (*target)(void) )
+                                void (__cdecl *target)(void) )
 {
     RtlUnwind( frame, target, record, 0 );
     for (;;) target();
@@ -267,7 +342,7 @@ void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_
 
 #endif
 
-static void DECLSPEC_NORETURN unwind_target(void)
+static void __cdecl DECLSPEC_NORETURN unwind_target(void)
 {
     __WINE_FRAME *wine_frame = (__WINE_FRAME *)__wine_get_frame();
     __wine_pop_frame( &wine_frame->frame );

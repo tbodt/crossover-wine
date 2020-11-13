@@ -696,7 +696,8 @@ void state_clipping(struct wined3d_context *context, const struct wined3d_state 
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     uint32_t enable_mask;
 
-    if (use_vs(state) && !context->d3d_info->vs_clipping)
+    if (use_vs(state) && !context->d3d_info->vs_clipping
+            && !(context_gl->gl_info->quirks & WINED3D_CX_QUIRK_GLSL_CLIP_BROKEN))
     {
         static BOOL warned;
 
@@ -716,6 +717,9 @@ void state_clipping(struct wined3d_context *context, const struct wined3d_state 
      * shader to update the enabled clipplanes. In case of fixed function, we
      * need to update the clipping field from ffp_vertex_settings. */
     context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_VERTEX;
+    /* If we are emulating user clip planes, in general we have to regenerate the PS. */
+    if (context_gl->gl_info->quirks & WINED3D_CX_QUIRK_GLSL_CLIP_BROKEN)
+        context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
 
     /* If enabling / disabling all
      * TODO: Is this correct? Doesn't D3DRS_CLIPPING disable clipping on the viewport frustrum?

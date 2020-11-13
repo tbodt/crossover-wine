@@ -48,6 +48,8 @@
 # include <cups/ppd.h>
 #endif
 
+
+
 #ifdef HAVE_APPLICATIONSERVICES_APPLICATIONSERVICES_H
 #define GetCurrentProcess GetCurrentProcess_Mac
 #define GetCurrentThread GetCurrentThread_Mac
@@ -121,6 +123,9 @@
 #include "wine/debug.h"
 #include "wine/list.h"
 #include "winnls.h"
+#include "shlwapi.h"
+#include "shellapi.h"
+#include "wine/heap.h"
 
 #include "ddk/winsplp.h"
 #include "wspool.h"
@@ -285,6 +290,7 @@ static const WCHAR May_Delete_Value[] = {'W','i','n','e','M','a','y','D','e','l'
 static const WCHAR CUPS_Port[] = {'C','U','P','S',':',0};
 static const WCHAR FILE_Port[] = {'F','I','L','E',':',0};
 static const WCHAR LPR_Port[] = {'L','P','R',':',0};
+static const WCHAR GCLOUD_Port[] = {'C','X','_','G','C','L','O','U','D',':',0};
 
 static const WCHAR default_doc_title[] = {'L','o','c','a','l',' ','D','o','w','n','l','e','v','e','l',' ',
                                           'D','o','c','u','m','e','n','t',0};
@@ -325,6 +331,15 @@ static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_win40
  *  SetLastError(ERROR_INVALID_ENVIRONMENT) is called on Failure
  *  
  */
+
+static char *strdup_unixcp( const WCHAR *str )
+{
+    char *ret;
+    int len = WideCharToMultiByte( CP_UNIXCP, 0, str, -1, NULL, 0, NULL, NULL );
+    if ((ret = HeapAlloc( GetProcessHeap(), 0, len )))
+        WideCharToMultiByte( CP_UNIXCP, 0, str, -1, ret, len, NULL, NULL );
+    return ret;
+}
 
 static const  printenv_t * validate_envW(LPCWSTR env)
 {
@@ -665,6 +680,8 @@ static char *get_fallback_ppd_name( const char *printer_name )
     return NULL;
 }
 
+#include "wine/hostaddrspace_enter.h"
+
 static BOOL copy_file( const char *src, const char *dst )
 {
     int fds[2] = {-1, -1}, num;
@@ -687,6 +704,8 @@ fail:
     if (fds[0] != -1) close( fds[0] );
     return ret;
 }
+
+#include "wine/hostaddrspace_exit.h"
 
 static BOOL get_internal_fallback_ppd( const WCHAR *ppd )
 {
@@ -780,6 +799,8 @@ static void unlink_ppd( const WCHAR *ppd )
 
 #ifdef SONAME_LIBCUPS
 
+#include "wine/hostaddrspace_enter.h"
+
 static void *cupshandle;
 
 #define CUPS_FUNCS \
@@ -804,11 +825,13 @@ static const char *  (*pcupsGetPPD)(const char *);
 static http_status_t (*pcupsGetPPD3)(http_t *, const char *, time_t *, char *, size_t);
 static const char *  (*pcupsLastErrorString)(void);
 
-static http_status_t cupsGetPPD3_wrapper( http_t *http, const char *name,
+#include "wine/hostaddrspace_exit.h"
+
+static http_status_t cupsGetPPD3_wrapper( http_t *http, const char * HOSTPTR name,
                                           time_t *modtime, char *buffer,
                                           size_t bufsize )
 {
-    const char *ppd;
+    const char * HOSTPTR ppd;
 
     if (pcupsGetPPD3) return pcupsGetPPD3( http, name, modtime, buffer, bufsize );
 
@@ -832,11 +855,13 @@ static http_status_t cupsGetPPD3_wrapper( http_t *http, const char *name,
     return HTTP_OK;
 }
 
-static BOOL get_cups_ppd( const char *printer_name, const WCHAR *ppd )
+static BOOL get_cups_ppd( const char * HOSTPTR printer_name, const WCHAR *ppd )
 {
     time_t modtime = 0;
     http_status_t http_status;
     char *unix_name = wine_get_unix_file_name( ppd );
+    BOOL ret;
+    char *name;
 
     TRACE( "(%s, %s)\n", debugstr_a(printer_name), debugstr_w(ppd) );
 
@@ -852,12 +877,16 @@ static BOOL get_cups_ppd( const char *printer_name, const WCHAR *ppd )
 
     TRACE( "failed to get ppd for printer %s from cups (status %d), calling fallback\n",
            debugstr_a(printer_name), http_status );
-    return get_fallback_ppd( printer_name, ppd );
+
+    name = heap_strdup( printer_name );
+    ret = get_fallback_ppd( name, ppd );
+    heap_free( name );
+    return ret;
 }
 
 static WCHAR *get_cups_option( const char *name, int num_options, cups_option_t *options )
 {
-    const char *value;
+    const char * HOSTPTR value;
     WCHAR *ret;
     int len;
 
@@ -1154,7 +1183,7 @@ static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
     size_t		name_len;
     char		*e,*s,*name,*prettyname,*devname;
     BOOL		ret = FALSE, set_default = FALSE;
-    char *port = NULL, *env_default;
+    char *port = NULL, * HOSTPTR env_default;
     HKEY hkeyPrinter, hkeyPrinters = NULL;
     WCHAR devnameW[MAX_PATH], *ppd_dir = NULL, *ppd;
     HANDLE added_printer;
@@ -6925,6 +6954,11 @@ BOOL WINAPI AddPrinterConnectionW( LPWSTR pName )
  */
 BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD level, LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
 {
+    WCHAR *ppd_dir = NULL, *ppd_fullpath;
+    char *printer_name;
+    DRIVER_INFO_3W *pd = (DRIVER_INFO_3W*)pDriverInfo;
+    int i;
+
     TRACE("(%s, %d, %p, 0x%x)\n", debugstr_w(pName), level, pDriverInfo, dwFileCopyFlags);
 
     if ((backend == NULL)  && !load_backend()) return FALSE;
@@ -6938,6 +6972,20 @@ BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD level, LPBYTE pDriverInfo, 
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+
+#ifdef __ANDROID__
+    TRACE( "Querying for fallback ppd on Android.\n" );
+    ppd_dir = get_ppd_dir();
+
+    if (!pName) pName = pd->pName;
+    ppd_fullpath = get_ppd_filename( ppd_dir, pName );
+    printer_name = strdup_unixcp( pName );
+
+    get_fallback_ppd( printer_name, ppd_fullpath );
+    pd->pDataFile = ppd_fullpath;
+    dwFileCopyFlags |= APD_COPY_NEW_FILES | APD_COPY_FROM_DIRECTORY;
+    HeapFree( GetProcessHeap(), 0, printer_name );
+#endif
 
     return backend->fpAddPrinterDriverEx(pName, level, pDriverInfo, dwFileCopyFlags);
 }
@@ -8387,6 +8435,186 @@ static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR docume
     }
 }
 
+static BOOL get_command( HKEY key, const WCHAR *value, WCHAR *buffer, DWORD size )
+{
+    DWORD type;
+    LSTATUS res;
+
+    size -= sizeof(WCHAR);
+    if (!(res = RegQueryValueExW( key, value, 0, &type, (LPBYTE)buffer, &size )) && (type == REG_SZ))
+    {
+        /* convert to REG_MULTI_SZ type */
+        WCHAR *p = buffer;
+        TRACE( "found cloud print cmd : %s\n", debugstr_w( p ) );
+        p[strlenW(p) + 1] = 0;
+        while ((p = strchrW( p, ',' ))) *p++ = 0;
+    }
+    else
+      ERR( "Failed to find print command for %s\n", debugstr_w( value ) );
+    return (res == ERROR_SUCCESS);
+}
+
+static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename,
+                                const WCHAR *titleW, const WCHAR *printer_idW, const WCHAR *printer_nameW )
+{
+    char *fname;
+    WCHAR *cmd;
+    int i, count;
+    char * HOSTPTR * HOSTPTR argv_new;
+    BOOL rc = TRUE;
+    WCHAR **args, *quoted_title, *quoted_printername;
+    const char *prefix = "file://";
+    static const WCHAR untitledW[] = { 'U','n','t','i','t','l','e','d',0};
+    static const WCHAR fmt[] = { '"', '%', 's', '"', 0 };
+
+    if (!titleW || !strlenW( titleW ))
+        titleW = untitledW;
+
+    fname = HeapAlloc( GetProcessHeap(), 0, strlen( filename ) + strlen( prefix ) + 1 );
+    fname[0] = 0;
+    strcpy( fname, prefix );
+    strcat( fname, filename );
+
+    quoted_title = HeapAlloc( GetProcessHeap(), 0, (strlenW( titleW ) + 3) * sizeof( WCHAR ) );
+    wsprintfW( quoted_title, fmt, titleW );
+
+    quoted_printername = HeapAlloc( GetProcessHeap(), 0, (strlenW( printer_nameW ) + 3) * sizeof( WCHAR ) );
+    wsprintfW( quoted_printername, fmt, printer_nameW );
+
+    cmd = HeapAlloc( GetProcessHeap(), 0,
+                     (strlenW( cmd_templateW ) + strlen( fname ) +
+                      strlen( filename ) + strlenW( quoted_title ) +
+                      strlenW( quoted_printername ) + strlenW( printer_idW ) + 1 ) *
+                     sizeof(WCHAR) );
+    wsprintfW( cmd, cmd_templateW, fname, printer_idW, quoted_printername, quoted_title );
+    args = CommandLineToArgvW( cmd, &count );
+    if (!(argv_new = HeapAlloc( GetProcessHeap(), 0, (count + 1) * sizeof(*argv_new) ))) return 0;
+    for (i = 0; i < count; i++) argv_new[i] = strdup_unixcp( args[i] );
+    argv_new[count] = NULL;
+
+    TRACE( "Trying" );
+    for (i = 0; i < count; i++) TRACE( " %s", debugstr_a( argv_new[i] ));
+    TRACE( "\n" );
+    if ((_spawnvp( _P_NOWAIT, argv_new[0], (const char * HOSTPTR * HOSTPTR)argv_new )) == -1)
+    {
+        WINE_ERR( "Failed to launch %s : %d\n", debugstr_a( argv_new[0] ), errno );
+        rc = FALSE;
+    }
+
+    for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(char*, argv_new[i]) );
+    HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(void*, argv_new) );
+    HeapFree( GetProcessHeap(), 0, cmd );
+    HeapFree( GetProcessHeap(), 0, fname );
+    HeapFree( GetProcessHeap(), 0, quoted_title );
+    HeapFree( GetProcessHeap(), 0, quoted_printername );
+
+    return rc;
+}
+
+static int file_copy( const char *dst_fname, const char *src_fname )
+{
+    int src, dst;
+    char buf[8192];
+    ssize_t n;
+
+    TRACE( "copying %s -> %s\n", src_fname, dst_fname );
+
+    src = open( src_fname, O_RDONLY );
+    if (src < 0)
+    {
+        ERR( "Failed opening src file %s : %d\n", src_fname, errno );
+        return 0;
+    }
+
+    dst = open( dst_fname, O_WRONLY | O_CREAT, 0666 );
+    if (dst < 0)
+    {
+        ERR( "Failed opening dest file %s : %d.\n", dst_fname, errno );
+        goto error;
+    }
+
+    while ((n = read( src, buf, sizeof(buf) )) > 0)
+    {
+        char *out = buf;
+        ssize_t len;
+
+        do
+        {
+            len = write( dst, out, n );
+            if (!len && errno != EINTR)
+            {
+                ERR( "write failed during copy: %d\n", errno );
+                goto error;
+            }
+            n -= len;
+            out += len;
+        } while(n > 0);
+    }
+
+    if (!n)
+    {
+        close( dst );
+        close( src );
+        TRACE( "Finished copying %s -> %s\n", src_fname, dst_fname );
+        return TRUE;
+    }
+
+ error:
+    close( src );
+    if (dst >= 0) close( dst );
+    return FALSE;
+}
+
+/*****************************************************************************
+ *          schedule_gcloud
+ */
+static BOOL schedule_gcloud(LPWSTR printer_id, LPCWSTR filename,
+                            LPCWSTR document_title, LPCWSTR printer_name)
+{
+    static const WCHAR printer_key[] =
+        {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+         'C','l','o','u','d','P','r','i','n','t','e','r',0};
+    static const WCHAR launch_job[] =
+        {'L','a','u','n','c','h','J','o','b',0};
+    static const WCHAR spool_dir[] =
+        {'S','p','o','o','l','D','i','r',0};
+    WCHAR cmdlineW[512];
+    WCHAR android_spool_dirW[MAX_PATH];
+    HKEY key;
+    LONG rc;
+    DWORD type, size;
+    char template[MAX_PATH], *android_spool_dir;
+    int fd;
+
+    if  ((rc = RegOpenKeyW( HKEY_CURRENT_USER, printer_key, &key )))
+        return !rc;
+
+    if (!(rc = get_command( key, launch_job, cmdlineW, sizeof(cmdlineW) )))
+        return rc;
+
+    size = sizeof( android_spool_dirW );
+    if ((rc = RegQueryValueExW( key, spool_dir, NULL, &type, (LPBYTE)android_spool_dirW, &size ) ))
+        return !rc;
+
+    RegCloseKey( key );
+
+    android_spool_dir = strdup_unixcp( android_spool_dirW );
+    strcpy( template, android_spool_dir );
+    strcat( template, "/XXXXXX" );
+    fd = mkstemp( template );
+    if (fd)
+        close( fd );
+    else
+        TRACE( "mkstemp failed : %d\n", errno );
+
+    /* FIXME: Clean up files from android_spool_dir */
+    rc = file_copy( template, wine_get_unix_file_name( filename ) );
+    HeapFree( GetProcessHeap(), 0, android_spool_dir );
+    if (!rc) return rc;
+
+    return google_cloud_print( cmdlineW, template, document_title, printer_id, printer_name );
+}
+
 static INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     LPWSTR filename;
@@ -8582,6 +8810,18 @@ BOOL WINAPI ScheduleJob( HANDLE hPrinter, DWORD dwJobID )
             else if(!strncmpW(portname, CUPS_Port, strlenW(CUPS_Port)))
             {
                 ret = schedule_cups(portname + strlenW(CUPS_Port), job->filename, job->document_title);
+            }
+            else if(!strncmpW(portname, GCLOUD_Port, strlenW(GCLOUD_Port)))
+            {
+                if (!pi5)
+                {
+                    GetPrinterW(hPrinter, 5, NULL, 0, &needed);
+                    pi5 = HeapAlloc(GetProcessHeap(), 0, needed);
+                    GetPrinterW(hPrinter, 5, (LPBYTE)pi5, needed, &needed);
+                }
+
+                ret = schedule_gcloud(portname + strlenW(GCLOUD_Port), job->filename, job->document_title,
+                                      pi5->pPrinterName);
             }
             else if(!strncmpW(portname, FILE_Port, strlenW(FILE_Port)))
             {

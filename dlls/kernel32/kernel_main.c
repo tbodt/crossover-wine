@@ -37,6 +37,7 @@
 #include "kernel_private.h"
 #include "console_private.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -108,6 +109,8 @@ static BOOL process_attach( HMODULE module )
 
         if (LdrFindEntryForAddress( GetModuleHandleW( 0 ), &ldr ) || !(ldr->Flags & LDR_WINE_INTERNAL))
             LoadLibraryA( "krnl386.exe16" );
+        /* Codeweavers hack: native crypt32 installed by IE6 is buggy (bug 5259) */
+        set_entry_point( module, "RegisterWaitForSingleObjectEx", 0 );
     }
 
     /* finish the process initialisation for console bits, if needed */
@@ -124,6 +127,38 @@ static BOOL process_attach( HMODULE module )
      * 2/ create std handles, if handles are not inherited
      * TBD when not using wineserver handles for console handles
      */
+
+    /* CROSSOVER HACK: bug 3853 */
+    {
+        static const WCHAR explorerexeW[] = {'e','x','p','l','o','r','e','r','.','e','x','e',0};
+        const char * HOSTPTR child_pipe = getenv("WINE_WAIT_CHILD_PIPE");
+        const char * HOSTPTR ignore_child = getenv("WINE_WAIT_CHILD_PIPE_IGNORE");
+        WCHAR *p;
+        if (child_pipe)
+        {
+            WCHAR module[MAX_PATH];
+            GetModuleFileNameW( NULL, module, MAX_PATH );
+            if ((p = strrchrW( module, '\\' ))) p++;
+            else p = module;
+            if (!strcmpiW( p, explorerexeW ))
+            {
+                int fd = atoi(child_pipe);
+                if (fd) close( fd );
+                unsetenv("WINE_WAIT_CHILD_PIPE");
+            }
+            else if (ignore_child)
+            {
+                WCHAR ignore[MAX_PATH];
+                MultiByteToWideChar( CP_UNIXCP, 0, ignore_child, -1, ignore, MAX_PATH );
+                if (!strcmpiW( p, ignore ))
+                {
+                    int fd = atoi(child_pipe);
+                    if (fd) close( fd );
+                    unsetenv("WINE_WAIT_CHILD_PIPE");
+                }
+            }
+        }
+    }
 
     return TRUE;
 }

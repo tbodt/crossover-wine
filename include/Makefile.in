@@ -200,6 +200,7 @@ SOURCES = \
 	dimm.idl \
 	dinput.h \
 	dinputd.h \
+	directmanipulation.idl \
 	dispdib.h \
 	dispex.idl \
 	dlgs.h \
@@ -706,6 +707,8 @@ SOURCES = \
 	wine/library.h \
 	wine/svcctl.idl \
 	wine/winedxgi.idl \
+	wine/winheader_enter.h \
+	wine/winheader_exit.h \
 	winerror.h \
 	winevt.h \
 	wingdi.h \

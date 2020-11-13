@@ -539,7 +539,6 @@ void output_bin_resources( DLLSPEC *spec, unsigned int start_rva )
     if (!spec->nb_resources) return;
 
     tree = build_resource_tree( spec, &data_offset );
-    init_output_buffer();
 
     /* output the resource directories */
 
@@ -690,6 +689,7 @@ void output_res_o_file( DLLSPEC *spec )
     switch (target_cpu)
     {
         case CPU_x86:
+        case CPU_x86_32on64:
             format = "pe-i386";
             break;
         case CPU_x86_64:

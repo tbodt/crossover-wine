@@ -312,7 +312,7 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResource_U( HMODULE hmod, const LDR_RES
 
 
 /* don't penalize other platforms stuff needed on i386 for compatibility */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 NTSTATUS WINAPI DECLSPEC_HIDDEN access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                                  void **ptr, ULONG *size )
 #else
@@ -373,12 +373,27 @@ __ASM_STDCALL_FUNC( LdrAccessResource, 16,
     "ret $16"
 )
 #else
+#ifdef __i386_on_x86_64__
+__ASM_STDCALL_FUNC32( __ASM_THUNK_NAME(LdrAccessResource), 16,
+    "pushl %ebp\n\t"
+    "movl %esp, %ebp\n\t"
+    "subl $4,%esp\n\t"
+    "pushl 24(%ebp)\n\t"
+    "pushl 20(%ebp)\n\t"
+    "pushl 16(%ebp)\n\t"
+    "pushl 12(%ebp)\n\t"
+    "pushl 8(%ebp)\n\t"
+    "call " __ASM_THUNK_SYMBOL("access_resource") "\n\t"
+    "leave\n\t"
+    "ret $16"
+)
+#endif /* __i386_on_x86_64__ */
 NTSTATUS WINAPI LdrAccessResource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                    void **ptr, ULONG *size )
 {
     return access_resource( hmod, entry, ptr, size );
 }
-#endif
+#endif /* __i386__ */
 
 /**********************************************************************
  *	RtlFindMessage  (NTDLL.@)

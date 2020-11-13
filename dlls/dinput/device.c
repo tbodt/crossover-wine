@@ -193,7 +193,7 @@ void _dump_OBJECTINSTANCEW(const DIDEVICEOBJECTINSTANCEW *ddoi) {
 }
 
 /* This function is a helper to convert a GUID into any possible DInput GUID out there */
-const char *_dump_dinput_GUID(const GUID *guid) {
+const char * HOSTPTR _dump_dinput_GUID(const GUID *guid) {
     unsigned int i;
     static const struct {
 	const GUID *guid;

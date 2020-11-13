@@ -216,13 +216,22 @@ BOOL WINAPI IsBadCodePtr( FARPROC ptr )
  *	Success: TRUE.
  *	Failure: FALSE. Read access to all bytes in string.
  */
+#ifdef __i386_on_x86_64__
 BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
+{
+    return IsBadStringPtrA((const char * HOSTPTR)str, (ULONGLONG)max);
+}
+
+BOOL WINAPI IsBadStringPtrA( const char * HOSTPTR str, ULONGLONG max ) __attribute__((overloadable))
+#else
+BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
+#endif
 {
     if (!str) return TRUE;
 
     __TRY
     {
-        volatile const char *p = str;
+        volatile const char * HOSTPTR p = str;
         while (p != str + max) if (!*p++) break;
     }
     __EXCEPT( badptr_handler )
@@ -240,13 +249,22 @@ BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
  *
  * See IsBadStringPtrA.
  */
+#ifdef __i386_on_x86_64__
 BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
+{
+    return IsBadStringPtrW( (const WCHAR * HOSTPTR)str, (ULONGLONG)max );
+}
+
+BOOL WINAPI IsBadStringPtrW( const WCHAR * HOSTPTR str, ULONGLONG max ) __attribute__((overloadable))
+#else
+BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
+#endif
 {
     if (!str) return TRUE;
 
     __TRY
     {
-        volatile const WCHAR *p = str;
+        volatile const WCHAR * HOSTPTR p = str;
         while (p != str + max) if (!*p++) break;
     }
     __EXCEPT( badptr_handler )

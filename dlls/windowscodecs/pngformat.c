@@ -37,6 +37,7 @@
 
 #include "wine/debug.h"
 #include "wine/library.h"
+#include "wine/objidl_helpers.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
 
@@ -299,8 +300,8 @@ HRESULT PngChrmReader_CreateInstance(REFIID iid, void** ppv)
 
 #ifdef SONAME_LIBPNG
 
-static void *libpng_handle;
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
+static void * HOSTPTR libpng_handle;
+#define MAKE_FUNCPTR(f) static typeof(&f) p##f
 MAKE_FUNCPTR(png_create_read_struct);
 MAKE_FUNCPTR(png_create_info_struct);
 MAKE_FUNCPTR(png_create_write_struct);
@@ -341,6 +342,31 @@ MAKE_FUNCPTR(png_write_info);
 MAKE_FUNCPTR(png_write_rows);
 #undef MAKE_FUNCPTR
 
+/* CX Hack 9660:
+ * Search for more soname names than the one
+ * that we happened to build Wine against. */
+static struct {
+    const char *soname;
+    const char *verstring;
+} libpng_candidates[] = {
+    { SONAME_LIBPNG, PNG_LIBPNG_VER_STRING },
+    { "libpng16.so", "1.6.0" },
+    { "libpng16.so.0", "1.6.0" },
+    { "libpng16.so.16", "1.6.0" },
+    { "libpng15.so", "1.5.0" },
+    { "libpng15.so.0", "1.5.0" },
+    { "libpng15.so.15", "1.5.0" },
+    { "libpng14.so", "1.4.0" },
+    { "libpng14.so.0", "1.4.0" },
+    { "libpng14.so.14", "1.4.0" },
+    { "libpng12.so", "1.2.0" },
+    { "libpng12.so.0", "1.2.0" },
+    { "libpng12.so.12", "1.2.0" },
+};
+
+static const char *soname_libpng;
+static const char *libpng_ver_string;
+
 static CRITICAL_SECTION init_png_cs;
 static CRITICAL_SECTION_DEBUG init_png_cs_debug =
 {
@@ -354,13 +380,21 @@ static CRITICAL_SECTION init_png_cs = { &init_png_cs_debug, -1, 0, 0, 0, 0 };
 static const WCHAR wszPngInterlaceOption[] = {'I','n','t','e','r','l','a','c','e','O','p','t','i','o','n',0};
 static const WCHAR wszPngFilterOption[] = {'F','i','l','t','e','r','O','p','t','i','o','n',0};
 
-static void *load_libpng(void)
+static void * HOSTPTR load_libpng(void)
 {
-    void *result;
+    int i;
+    void * HOSTPTR result;
 
     EnterCriticalSection(&init_png_cs);
+    for(i = 0; i < sizeof(libpng_candidates) / sizeof(*libpng_candidates); ++i){
+        soname_libpng = libpng_candidates[i].soname;
+        libpng_ver_string = libpng_candidates[i].verstring;
+        libpng_handle = wine_dlopen(soname_libpng, RTLD_NOW, NULL, 0);
+        if(libpng_handle)
+            break;
+    }
 
-    if(!libpng_handle && (libpng_handle = wine_dlopen(SONAME_LIBPNG, RTLD_NOW, NULL, 0)) != NULL) {
+    if(libpng_handle){
 
 #define LOAD_FUNCPTR(f) \
     if((p##f = wine_dlsym(libpng_handle, #f, NULL, 0)) == NULL) { \
@@ -557,11 +591,11 @@ static HRESULT WINAPI PngDecoder_QueryCapability(IWICBitmapDecoder *iface, IStre
 
 static void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-    IStream *stream = ppng_get_io_ptr(png_ptr);
+    IStream *stream = ADDRSPACECAST(void *, ppng_get_io_ptr(png_ptr));
     HRESULT hr;
     ULONG bytesread;
 
-    hr = IStream_Read(stream, data, length, &bytesread);
+    hr = i_stream_read(stream, data, length, &bytesread);
     if (FAILED(hr) || bytesread != length)
     {
         ppng_error(png_ptr, "failed reading data");
@@ -574,7 +608,7 @@ static HRESULT WINAPI PngDecoder_Initialize(IWICBitmapDecoder *iface, IStream *p
     PngDecoder *This = impl_from_IWICBitmapDecoder(iface);
     LARGE_INTEGER seek;
     HRESULT hr=S_OK;
-    png_bytep *row_pointers=NULL;
+    png_bytep * WIN32PTR row_pointers=NULL;
     UINT image_size;
     UINT i;
     int color_type, bit_depth;
@@ -593,7 +627,7 @@ static HRESULT WINAPI PngDecoder_Initialize(IWICBitmapDecoder *iface, IStream *p
     EnterCriticalSection(&This->lock);
 
     /* initialize libpng */
-    This->png_ptr = ppng_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    This->png_ptr = ppng_create_read_struct(libpng_ver_string, NULL, NULL, NULL);
     if (!This->png_ptr)
     {
         hr = E_FAIL;
@@ -1306,7 +1340,7 @@ HRESULT PngDecoder_CreateInstance(REFIID iid, void** ppv)
 
     if (!load_libpng())
     {
-        ERR("Failed reading PNG because unable to find %s\n",SONAME_LIBPNG);
+        ERR("Failed reading PNG because unable to find libpng 1.2-1.5\n");
         return E_FAIL;
     }
 
@@ -1771,6 +1805,19 @@ static HRESULT WINAPI PngFrameEncode_WriteSource(IWICBitmapFrameEncode *iface,
 
     if (SUCCEEDED(hr))
     {
+        /* CrossOver hack for bug 14406 */
+        if (This->colors == 0)
+        {
+            IWICPalette *palette;
+
+            if (SUCCEEDED(PaletteImpl_Create(&palette)))
+            {
+                if (SUCCEEDED(IWICBitmapSource_CopyPalette(pIBitmapSource, palette)))
+                    IWICBitmapFrameEncode_SetPalette(iface, palette);
+                IWICPalette_Release(palette);
+            }
+        }
+
         hr = write_source(iface, pIBitmapSource, prc,
             This->format->guid, This->format->bpp, This->width, This->height);
     }
@@ -1912,11 +1959,11 @@ static ULONG WINAPI PngEncoder_Release(IWICBitmapEncoder *iface)
 
 static void user_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-    PngEncoder *This = ppng_get_io_ptr(png_ptr);
+    PngEncoder *This = ADDRSPACECAST(void *, ppng_get_io_ptr(png_ptr));
     HRESULT hr;
     ULONG byteswritten;
 
-    hr = IStream_Write(This->stream, data, length, &byteswritten);
+    hr = i_stream_write(This->stream, data, length, &byteswritten);
     if (FAILED(hr) || byteswritten != length)
     {
         ppng_error(png_ptr, "failed writing data");
@@ -1944,7 +1991,7 @@ static HRESULT WINAPI PngEncoder_Initialize(IWICBitmapEncoder *iface,
     }
 
     /* initialize libpng */
-    This->png_ptr = ppng_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    This->png_ptr = ppng_create_write_struct(libpng_ver_string, NULL, NULL, NULL);
     if (!This->png_ptr)
     {
         LeaveCriticalSection(&This->lock);
@@ -2148,7 +2195,7 @@ HRESULT PngEncoder_CreateInstance(REFIID iid, void** ppv)
 
     if (!load_libpng())
     {
-        ERR("Failed writing PNG because unable to find %s\n",SONAME_LIBPNG);
+        ERR("Failed writing PNG because unable to find libpng 1.2-1.5\n");
         return E_FAIL;
     }
 

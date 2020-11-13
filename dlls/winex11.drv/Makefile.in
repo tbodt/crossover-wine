@@ -15,6 +15,7 @@ C_SRCS = \
 	ime.c \
 	init.c \
 	keyboard.c \
+	mac_xim.c \
 	mouse.c \
 	opengl.c \
 	palette.c \

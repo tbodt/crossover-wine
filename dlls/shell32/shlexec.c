@@ -375,6 +375,62 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     return retval;
 }
 
+/*
+ * Helper function for ShellExecuteExA
+ * In order to prevent opening of particular extension types
+ */
+static BOOL verify_extension_permission(const WCHAR* ext)
+{
+    static const WCHAR AppDefaultsW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+                                         'A','p','p','D','e','f','a','u','l','t','s',0};
+    static const WCHAR DenyShellExecuteW[] = {'D','e','n','y','S','h','e','l','l','E','x','e','c','u','t','e',0};
+    WCHAR buffer[MAX_PATH];
+    WCHAR *filename;
+    HKEY hkey,appkey;
+    int RC;
+    DWORD type,count;
+
+    if(!GetModuleFileNameW(0,buffer,MAX_PATH))
+        return TRUE;
+
+    filename = PathFindFileNameW(buffer);
+    /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe */
+    if (RegOpenKeyW( HKEY_CURRENT_USER, AppDefaultsW, &hkey ))
+        return TRUE;
+
+    if (RegOpenKeyW( hkey, filename, &appkey )) appkey = 0;
+    RegCloseKey( hkey );
+
+    if (!appkey)
+        return TRUE;
+
+    RC = TRUE;
+    count = sizeof(buffer);
+    if (!RegQueryValueExW(appkey,DenyShellExecuteW,NULL,&type,(LPBYTE)buffer,&count))
+    {
+        WCHAR *s,*e;
+        int lext;
+
+        buffer[count / sizeof(WCHAR)] = 0;
+        ext++; /* Skip the '.' */
+        lext=strlenW(ext);
+        s=buffer;
+        while (*s) {
+            e=strchrW(s,';');
+            if (!e)
+                e=s+strlenW(s);
+            if ((e-s==lext) && (strncmpiW(ext,s,lext)==0))
+            {
+                RC=FALSE;
+                break;
+            }
+            s=(*e?e+1:e);
+        }
+    }
+    RegCloseKey(appkey);
+    return RC;
+}
+
 
 /***********************************************************************
  *           SHELL_BuildEnvW	[Internal]
@@ -640,6 +696,8 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
             WARN("Returning SE_ERR_NOASSOC\n");
             return SE_ERR_NOASSOC;
         }
+
+        if (!verify_extension_permission(extension)) return 31;  /* no association */
 
         /* Three places to check: */
         /* 1. win.ini, [windows], programs (NB no leading '.') */
@@ -1062,6 +1120,37 @@ HINSTANCE WINAPI FindExecutableA(LPCSTR lpFile, LPCSTR lpDirectory, LPSTR lpResu
     return retval;
 }
 
+static UINT_PTR SHELL_CrossOverFallback(const WCHAR* lpFile, const WCHAR* lpVerb, WCHAR* cmdFormat, int cmdFormatSize)
+{
+    /* See if there is a native association for this file.
+     * This is a CodeWeavers only hack.
+     *
+     * But before that, check that this is not the file we just opened
+     * in order to avoid native -> wine -> native association loops.
+     */
+    UINT_PTR retval = SE_ERR_NOASSOC;
+    static const WCHAR NoCrossOverFallbackW[] = {'N','O','C','R','O','S','S','O','V','E','R','F','A','L','L','B','A','C','K',0};
+    WCHAR* nofallback=NULL;
+    int size=GetEnvironmentVariableW(NoCrossOverFallbackW, NULL, 0);
+    if (size)
+    {
+        nofallback=HeapAlloc(GetProcessHeap(), 0, size*sizeof(*nofallback));
+        GetEnvironmentVariableW(NoCrossOverFallbackW, nofallback, size);
+        TRACE("NoCrossOverFallback=%s\n", debugstr_w(nofallback));
+    }
+    if (!nofallback || strcmpW(nofallback, lpFile) != 0)
+    {
+        WCHAR szFallback[MAX_PATH] = {'C','r','o','s','s','O','v','e','r','F','a','l','l','b','a','c','k',0};
+
+        TRACE("Trying CrossOverFallback, verb=%s\n", debugstr_w(lpVerb));
+        retval=SHELL_FindExecutableByVerb(lpVerb, NULL, szFallback, cmdFormat, cmdFormatSize);
+    }
+    if (nofallback)
+        HeapFree(GetProcessHeap(), 0, nofallback);
+    TRACE("CrossOverFallback returning %ld\n", retval);
+    return retval;
+}
+
 /*************************************************************************
  * FindExecutableW			[SHELL32.@]
  *
@@ -1109,6 +1198,35 @@ HINSTANCE WINAPI FindExecutableW(LPCWSTR lpFile, LPCWSTR lpDirectory, LPWSTR lpR
 
     if (retval > 32)
         strcpyW(lpResult, res);
+
+    if (retval <= 32)
+    {
+        retval=SHELL_CrossOverFallback(lpFile, wszOpen, lpResult, MAX_PATH*sizeof(*lpResult));
+        if (retval > 32)
+        {
+            /* Remove double quotation marks and command line arguments */
+            if (*lpResult == '"')
+            {
+                WCHAR *p = lpResult;
+                while (*(p + 1) != '"')
+                {
+                    *p = *(p + 1);
+                    p++;
+                }
+                *p = '\0';
+            }
+            else
+            {
+                /* Truncate on first space, like Windows:
+                 * http://support.microsoft.com/?scid=kb%3Ben-us%3B140724
+                 */
+                WCHAR *p = lpResult;
+                while (*p != ' ' && *p != '\0')
+                    p++;
+                *p='\0';
+            }
+        }
+    }
 
     TRACE("returning %s\n", debugstr_w(lpResult));
     if (lpDirectory)
@@ -1887,6 +2005,32 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         strcpyW(lpstrTmpFile, wHttp);
         strcatW(lpstrTmpFile, lpFile);
         retval = (UINT_PTR)ShellExecuteW(sei_tmp.hwnd, sei_tmp.lpVerb, lpstrTmpFile, NULL, NULL, 0);
+    }
+    else
+    {
+        WCHAR wCmdFormat[1024];
+        retval=SHELL_CrossOverFallback(lpFile, sei_tmp.lpVerb, wCmdFormat, sizeof(wCmdFormat));
+        if (retval > 32)
+        {
+
+            WCHAR wCommandLine[1024];
+            DWORD len;
+            TRACE("wCmdFormat=%s\n", debugstr_w(wCmdFormat));
+            SHELL_ArgifyW(wCommandLine, 1024, wCmdFormat, lpFile, sei_tmp.lpIDList, NULL, &len);
+            TRACE("wCommandLine=%s\n", debugstr_w(wCommandLine));
+            sei_tmp.fMask|=SEE_MASK_NOCLOSEPROCESS;
+            retval = execfunc(wCommandLine, env, FALSE, &sei_tmp, sei);
+            if (retval > 32)
+            {
+                DWORD retcode;
+                WaitForSingleObject(sei->hProcess, INFINITE);
+                GetExitCodeProcess(sei->hProcess, &retcode);
+                CloseHandle(sei->hProcess);
+                sei->hProcess=NULL;
+                TRACE("CrossOverFallback returned %d\n", retcode);
+                retval=(retcode == 0 ? 33 : 31);
+            }
+        }
     }
 
 end:

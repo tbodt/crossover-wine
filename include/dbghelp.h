@@ -21,6 +21,8 @@
 #ifndef __WINE_DBGHELP_H
 #define __WINE_DBGHELP_H
 
+#include "wine/winheader_enter.h"
+
 /* A set of documentation macros (see also imagehlp.h) */
 #ifndef __deref_out
 # define __deref_out
@@ -1274,8 +1276,8 @@ BOOL WINAPI SymMatchFileName(PCSTR, PCSTR, PSTR*, PSTR*);
 BOOL WINAPI SymMatchFileNameW(PCWSTR, PCWSTR, PWSTR*, PWSTR*);
 PCHAR WINAPI SymSetHomeDirectory(HANDLE, PCSTR);
 PWSTR WINAPI SymSetHomeDirectoryW(HANDLE, PCWSTR);
-PCHAR WINAPI SymGetHomeDirectory(DWORD, PSTR, size_t);
-PWSTR WINAPI SymGetHomeDirectoryW(DWORD, PWSTR, size_t);
+PCHAR WINAPI SymGetHomeDirectory(DWORD, PSTR, SIZE_T);
+PWSTR WINAPI SymGetHomeDirectoryW(DWORD, PWSTR, SIZE_T);
 #define hdBase  0
 #define hdSym   1
 #define hdSrc   2
@@ -1572,5 +1574,7 @@ BOOL    WINAPI SymUnloadModule(HANDLE, DWORD);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_DBGHELP_H */

@@ -46,7 +46,7 @@ static const unsigned int depths_32[]  = {8, 16, 32};
 
 /* pointers to functions that actually do the hard stuff */
 static int (*pGetCurrentMode)(void);
-static LONG (*pSetCurrentMode)(int mode);
+static LONG (*pSetCurrentMode)(int mode, struct x11drv_mode_info *mode_info);
 static const char *handler_name;
 
 /*
@@ -55,7 +55,7 @@ static const char *handler_name;
  */
 struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
                                                      int (*pNewGCM)(void),
-                                                     LONG (*pNewSCM)(int),
+                                                     LONG (*pNewSCM)(int, struct x11drv_mode_info *),
                                                      unsigned int nmodes,
                                                      int reserve_depths)
 {
@@ -136,7 +136,7 @@ static int X11DRV_nores_GetCurrentMode(void)
     return 0;
 }
 
-static LONG X11DRV_nores_SetCurrentMode(int mode)
+static LONG X11DRV_nores_SetCurrentMode(int mode, struct x11drv_mode_info *mode_info)
 {
     if (mode == 0) return DISP_CHANGE_SUCCESSFUL;
     TRACE("Ignoring mode change request mode=%d\n", mode);
@@ -418,7 +418,7 @@ LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
             write_registry_settings(devmode);
 
         if (!(flags & (CDS_TEST | CDS_NORESET)))
-            return pSetCurrentMode(i);
+            return pSetCurrentMode(i, &dd_modes[i]);
 
         return DISP_CHANGE_SUCCESSFUL;
     }

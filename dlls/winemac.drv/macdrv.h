@@ -42,6 +42,9 @@ extern BOOL allow_software_rendering DECLSPEC_HIDDEN;
 extern BOOL disable_window_decorations DECLSPEC_HIDDEN;
 extern HMODULE macdrv_module DECLSPEC_HIDDEN;
 
+/* CrossOver Hack 14364 */
+extern BOOL force_backing_store DECLSPEC_HIDDEN;
+
 
 extern const char* debugstr_cf(CFTypeRef t) DECLSPEC_HIDDEN;
 
@@ -66,7 +69,7 @@ static inline RECT rect_from_cgrect(CGRect cgrect)
     return empty;
 }
 
-static inline const char *wine_dbgstr_cgrect(CGRect cgrect)
+static inline const char * HOSTPTR wine_dbgstr_cgrect(CGRect cgrect)
 {
     return wine_dbg_sprintf("(%g,%g)-(%g,%g)", CGRectGetMinX(cgrect), CGRectGetMinY(cgrect),
                             CGRectGetMaxX(cgrect), CGRectGetMaxY(cgrect));
@@ -188,6 +191,8 @@ extern void macdrv_release_capture(HWND hwnd, const macdrv_event *event) DECLSPE
 extern void CDECL macdrv_SetCapture(HWND hwnd, UINT flags) DECLSPEC_HIDDEN;
 
 extern void macdrv_compute_keyboard_layout(struct macdrv_thread_data *thread_data) DECLSPEC_HIDDEN;
+/* CrossOver Hack 10912: Mac Edit menu */
+extern void macdrv_edit_menu_command(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_keyboard_changed(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_key_event(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_hotkey_press(const macdrv_event *event) DECLSPEC_HIDDEN;
@@ -230,7 +235,7 @@ extern void macdrv_init_display_devices(BOOL force) DECLSPEC_HIDDEN;
  */
 
 extern void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state,
-                                      void *himc, int* done) DECLSPEC_HIDDEN;
+                                      void * WIN32PTR himc, int* done) DECLSPEC_HIDDEN;
 
 extern void macdrv_im_set_text(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_sent_text_input(const macdrv_event *event) DECLSPEC_HIDDEN;

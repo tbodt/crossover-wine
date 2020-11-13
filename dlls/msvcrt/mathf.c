@@ -25,7 +25,7 @@
 
 #include <math.h>
 
-#if defined(__i386__) || (_MSVCR_VER > 0 && _MSVCR_VER < 80)
+#if defined(__i386__) || defined(__i386_on_x86_64__) || (_MSVCR_VER > 0 && _MSVCR_VER < 80)
 float sinf(float x) { return sin(x); }
 float cosf(float x) { return cos(x); }
 float tanf(float x) { return tan(x); }

@@ -96,6 +96,7 @@
  * types, they are not completely linked together.
  */
 
+#include <wine/winheader_enter.h>
 #include "pshpack1.h"
 
 /* ======================================== *
@@ -1849,6 +1850,13 @@ static inline const struct codeview_linetab2* codeview_linetab2_next_block(const
     return (const struct codeview_linetab2*)((const char*)(lt2 + 1) + lt2->size_of_block);
 }
 
+#ifdef __i386_on_x86_64__
+static inline const struct codeview_linetab2* HOSTPTR codeview_linetab2_next_block(const struct codeview_linetab2* HOSTPTR lt2) __attribute__((overloadable))
+{
+    return (const struct codeview_linetab2* HOSTPTR)((const char* HOSTPTR)(lt2 + 1) + lt2->size_of_block);
+}
+#endif
+
 struct codeview_linetab2_file
 {
     DWORD       offset;         /* offset in string table for filename */
@@ -2295,3 +2303,5 @@ typedef struct OMFSourceModule
     unsigned short  cSeg;
     unsigned long   baseSrcFile[1];
 } OMFSourceModule;
+
+#include <wine/winheader_exit.h>

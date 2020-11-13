@@ -33,6 +33,7 @@
 #include "msvcrt.h"
 #include "winnls.h"
 #include "wine/debug.h"
+#include "wine/asm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -1271,10 +1272,27 @@ MSVCRT_size_t __cdecl MSVCRT_strlen(const char *str)
     return strlen(str);
 }
 
+#ifdef __i386_on_x86_64__
+MSVCRT_size_t  __cdecl MSVCRT_strlen(const char* HOSTPTR str) __attribute__((overloadable)) asm(__ASM_NAME("MSVCRT_strlen_HOSTPTR"));
+MSVCRT_size_t  __cdecl MSVCRT_strlen(const char* HOSTPTR str) __attribute__((overloadable))
+{
+    return strlen(str);
+}
+#endif
+
 /******************************************************************
  *              strnlen (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 MSVCRT_size_t CDECL MSVCRT_strnlen(const char *s, MSVCRT_size_t maxlen)
+{
+    return MSVCRT_strnlen((const char* HOSTPTR)s, maxlen);
+}
+
+MSVCRT_size_t CDECL MSVCRT_strnlen(const char * HOSTPTR s, MSVCRT_size_t maxlen) __attribute__((overloadable))
+#else
+MSVCRT_size_t CDECL MSVCRT_strnlen(const char *s, MSVCRT_size_t maxlen)
+#endif
 {
     MSVCRT_size_t i;
 
@@ -2242,6 +2260,14 @@ void * __cdecl MSVCRT_memcpy(void *dst, const void *src, MSVCRT_size_t n)
 {
     return memmove(dst, src, n);
 }
+
+#ifdef __i386_on_x86_64__
+void * HOSTPTR __cdecl MSVCRT_memcpy(void * HOSTPTR dst, const void * HOSTPTR src, MSVCRT_size_t n) __attribute__((overloadable)) asm(__ASM_NAME("MSVCRT_memcpy_HOSTPTR"));
+void * HOSTPTR __cdecl MSVCRT_memcpy(void * HOSTPTR dst, const void * HOSTPTR src, MSVCRT_size_t n) __attribute__((overloadable))
+{
+    return memmove(dst, src, n);
+}
+#endif
 
 /*********************************************************************
  *                  memmove (MSVCRT.@)

@@ -1890,6 +1890,9 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
             return USER_Driver->pClipCursor( &rect );
         }
         return USER_Driver->pClipCursor( NULL );
+    case WM_WINE_UPDATEWINDOWSTATE:
+        update_window_state( hwnd );
+        return 0;
     default:
         if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
             return USER_Driver->pWindowMessage( hwnd, msg, wparam, lparam );
@@ -2906,6 +2909,9 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
                 result = HOOK_CallHooks( WH_MOUSE_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
             }
             reply_message( &info, result, TRUE );
+            continue;
+        case MSG_SURFACE:
+            process_surface_message( &info.msg, buffer );
             continue;
         case MSG_OTHER_PROCESS:
             info.flags = ISMEX_SEND;

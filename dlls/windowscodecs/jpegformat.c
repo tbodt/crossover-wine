@@ -59,7 +59,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
 #ifdef SONAME_LIBJPEG
 WINE_DECLARE_DEBUG_CHANNEL(jpeg);
 
-static void *libjpeg_handle;
+static void * HOSTPTR libjpeg_handle;
 
 static const WCHAR wszImageQuality[] = {'I','m','a','g','e','Q','u','a','l','i','t','y',0};
 static const WCHAR wszBitmapTransform[] = {'B','i','t','m','a','p','T','r','a','n','s','f','o','r','m',0};
@@ -84,7 +84,7 @@ MAKE_FUNCPTR(jpeg_std_error);
 MAKE_FUNCPTR(jpeg_write_scanlines);
 #undef MAKE_FUNCPTR
 
-static void *load_libjpeg(void)
+static void * HOSTPTR load_libjpeg(void)
 {
     if((libjpeg_handle = wine_dlopen(SONAME_LIBJPEG, RTLD_NOW, NULL, 0)) != NULL) {
 
@@ -173,7 +173,7 @@ static inline JpegDecoder *impl_from_IWICBitmapFrameDecode(IWICBitmapFrameDecode
 
 static inline JpegDecoder *decoder_from_decompress(j_decompress_ptr decompress)
 {
-    return CONTAINING_RECORD(decompress, JpegDecoder, cinfo);
+    return CONTAINING_RECORD(ADDRSPACECAST(struct jpeg_decompress_struct * WIN32PTR, decompress), JpegDecoder, cinfo);
 }
 
 static inline JpegDecoder *impl_from_IWICMetadataBlockReader(IWICMetadataBlockReader *iface)
@@ -845,7 +845,7 @@ static inline JpegEncoder *impl_from_IWICBitmapFrameEncode(IWICBitmapFrameEncode
 
 static inline JpegEncoder *encoder_from_compress(j_compress_ptr compress)
 {
-    return CONTAINING_RECORD(compress, JpegEncoder, cinfo);
+    return CONTAINING_RECORD(ADDRSPACECAST(struct jpeg_compress_struct * WIN32PTR, compress), JpegEncoder, cinfo);
 }
 
 static void dest_mgr_init_destination(j_compress_ptr cinfo)
@@ -1063,7 +1063,7 @@ static HRESULT WINAPI JpegEncoder_Frame_WritePixels(IWICBitmapFrameEncode *iface
 {
     JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
     jmp_buf jmpbuf;
-    BYTE *swapped_data = NULL, *current_row;
+    BYTE *swapped_data = NULL, * HOSTPTR current_row;
     UINT line;
     int row_size;
     TRACE("(%p,%u,%u,%u,%p)\n", iface, lineCount, cbStride, cbBufferSize, pbPixels);

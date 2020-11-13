@@ -87,6 +87,7 @@ struct process
     struct file         *exe_file;        /* file handle for main exe (during startup only) */
     obj_handle_t         winstation;      /* main handle to process window station */
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
+    struct list          surfaces;        /* list of surfaces that are flushed to this process */
     struct token        *token;           /* security token associated with this process */
     struct list          views;           /* list of memory views */
     struct list          dlls;            /* list of loaded dlls */
@@ -98,6 +99,7 @@ struct process
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
     struct list          kernel_object;   /* list of kernel object pointers */
+    struct esync_fd     *esync_fd;        /* esync file descriptor (signaled on exit) */
 };
 
 struct process_snapshot
@@ -131,6 +133,7 @@ extern void add_process_thread( struct process *process,
                                 struct thread *thread );
 extern void remove_process_thread( struct process *process,
                                    struct thread *thread );
+extern void remove_process_surfaces( struct process *process );
 extern void suspend_process( struct process *process );
 extern void resume_process( struct process *process );
 extern void kill_process( struct process *process, int violent_death );

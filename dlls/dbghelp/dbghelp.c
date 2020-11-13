@@ -26,6 +26,7 @@
 #include "winerror.h"
 #include "psapi.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 #include "wdbgexts.h"
 #include "winnls.h"
 
@@ -90,7 +91,7 @@ struct process*    process_find_by_handle(HANDLE hProcess)
  */
 BOOL validate_addr64(DWORD64 addr)
 {
-    if (sizeof(void*) == sizeof(int) && (addr >> 32))
+    if (!wine_is_64bit() && (addr >> 32))
     {
         FIXME("Unsupported address %s\n", wine_dbgstr_longlong(addr));
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -117,7 +118,7 @@ void* fetch_buffer(struct process* pcs, unsigned size)
     return pcs->buffer;
 }
 
-const char* wine_dbgstr_addr(const ADDRESS64* addr)
+const char* HOSTPTR wine_dbgstr_addr(const ADDRESS64* addr)
 {
     if (!addr) return "(null)";
     switch (addr->Mode)
@@ -139,7 +140,7 @@ extern struct cpu       cpu_i386, cpu_x86_64, cpu_ppc, cpu_arm, cpu_arm64;
 
 static struct cpu*      dbghelp_cpus[] = {&cpu_i386, &cpu_x86_64, &cpu_ppc, &cpu_arm, &cpu_arm64, NULL};
 struct cpu*             dbghelp_current_cpu =
-#if defined(__i386__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     &cpu_i386
 #elif defined(__x86_64__)
     &cpu_x86_64
@@ -320,7 +321,8 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     if (!pcs) return FALSE;
 
     pcs->handle = hProcess;
-    pcs->is_64bit = (sizeof(void *) == 8 || wow64) && !child_wow64;
+    pcs->is_64bit = (wine_is_64bit() || wow64) && !child_wow64;
+    pcs->is_32on64 = !pcs->is_64bit && wine_needs_32on64();
 
     if (UserSearchPath)
     {

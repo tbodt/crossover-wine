@@ -35,6 +35,7 @@
 #include "rpcdce.h"
 #include "rpcproxy.h"
 #include "midles.h"
+#include "oaidl.h"
 #include "ndrtypes.h"
 
 #include "wine/heap.h"
@@ -1210,6 +1211,283 @@ static void test_simple_struct(void)
     else
         *(unsigned int *)wiredata = (UINT_PTR)&ps1;
     test_pointer_marshal(fmtstr_pointer_struct, &ps1, 17, wiredata, 21, ps1_cmp, 2, "pointer_struct");
+}
+
+static void test_complex_struct(void)
+{
+    RPC_MESSAGE RpcMessage;
+    MIDL_STUB_MESSAGE StubMsg;
+    MIDL_STUB_DESC StubDesc;
+    void *memsrc, *ptr;
+    FUNCDESC fd;
+    ELEMDESC params[2];
+    TYPEDESC td[4];
+    FUNCDESC *dst;
+
+    static const unsigned char fmtstr_funcdesc[] =
+    {
+/* 0 */     0x11, 0x14,	/* FC_RP [alloced_on_stack] */
+/* 2 */     NdrFcShort( 0x2 ),	/* Offset= 2 (4) */
+/* 4 */     0x13, 0x0,	/* FC_OP */
+/* 6 */     NdrFcShort( 0xaa ),	/* Offset= 170 (176) */
+
+/** TYPEDESC union **/
+/* 8 */     0x2b,		/* FC_NON_ENCAPSULATED_UNION */
+            0x7,		/* FC_USHORT */
+/* 10 */    0x7,		/* Corr desc: FC_USHORT */
+            0x0,		/*  */
+/* 12 */    NdrFcShort( 0x4 ),	/* 4 */
+/* 14 */    NdrFcShort( 0x2 ),	/* Offset= 2 (16) */
+/* 16 */    NdrFcShort( 0x4 ),	/* 4 */
+/* 18 */    NdrFcShort( 0x4 ),	/* 4 */
+/* 20 */    NdrFcLong( 0x1a ),	/* 26 */
+/* 24 */    NdrFcShort( 0x16 ),	/* Offset= 22 (46) */
+/* 26 */    NdrFcLong( 0x1b ),	/* 27 */
+/* 30 */    NdrFcShort( 0x10 ),	/* Offset= 16 (46) */
+/* 32 */    NdrFcLong( 0x1c ),	/* 28 */
+/* 36 */    NdrFcShort( 0xe ),	/* Offset= 14 (50) */
+/* 38 */    NdrFcLong( 0x1d ),	/* 29 */
+/* 42 */    NdrFcShort( 0x8008 ),	/* Simple arm type: FC_LONG */
+/* 44 */    NdrFcShort( 0x0 ),	/* Offset= 0 */
+/* 46 */    0x13, 0x0,	/* FC_OP */
+/* 48 */    NdrFcShort( 0x24 ),	/* Offset= 36 (84) */
+/* 50 */    0x13, 0x0,	/* FC_OP */
+/* 52 */    NdrFcShort( 0x10 ),	/* Offset= 16 (68) */
+
+/** ARRAYDESC carray **/
+/* 54 */    0x1b,		/* FC_CARRAY */
+            0x3,		/* 3 */
+/* 56 */    NdrFcShort( 0x8 ),	/* 8 */
+/* 58 */    0x7,		/* Corr desc: FC_USHORT */
+            0x0,		/*  */
+/* 60 */    NdrFcShort( 0xfffc ),	/* -4 */
+/* 62 */    0x4c,		/* FC_EMBEDDED_COMPLEX */
+            0x0,		/* 0 */
+/* 64 */    NdrFcShort( 0x92 ),	/* Offset= 146 (210) */
+/* 66 */    0x5c,		/* FC_PAD */
+            0x5b,		/* FC_END */
+
+/** ARRADESC **/
+/* 68 */    0x1a,		/* FC_BOGUS_STRUCT */
+            0x3,		/* 3 */
+/* 70 */    NdrFcShort( 0x4 ),	/* 4 */
+/* 72 */    NdrFcShort( 0xffffffee ),	/* Offset= -18 (54) */
+/* 74 */    NdrFcShort( 0x0 ),	/* Offset= 0 */
+/* 76 */    0x4c,		/* FC_EMBEDDED_COMPLEX */
+            0x0,		/* 0 */
+/* 78 */    NdrFcShort( 0x6 ),	/* Offset= 6 (84) */
+/* 80 */    0x6,		/* FC_SHORT */
+            0x3e,		/* FC_STRUCTPAD2 */
+/* 82 */    0x5c,		/* FC_PAD */
+            0x5b,		/* FC_END */
+
+/** TYPEDESC **/
+/* 84 */    0x1a,		/* FC_BOGUS_STRUCT */
+	    0x3,		/* 3 */
+/* 86 */    NdrFcShort( 0x8 ),	/* 8 */
+/* 88 */    NdrFcShort( 0x0 ),	/* 0 */
+/* 90 */    NdrFcShort( 0x0 ),	/* Offset= 0 */
+/* 92 */    0x4c,		/* FC_EMBEDDED_COMPLEX */
+            0x0,		/* 0 */
+/* 94 */    NdrFcShort( 0xffffffaa ),	/* Offset= -86 (8) */
+/* 96 */    0x6,		/* FC_SHORT */
+            0x3e,		/* FC_STRUCTPAD2 */
+/* 98 */    0x5c,		/* FC_PAD */
+            0x5b,		/* FC_END */
+
+/** PARAMDESCEX **/
+
+/* 100 */   0x1a,		/* FC_BOGUS_STRUCT */
+            0x3,		/* 3 */
+/* 102 */   NdrFcShort( 0x18 ),	/* 24 */
+/* 104 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 106 */	NdrFcShort( 0x0 ),	/* Offset= 0 */
+/* 108 */	0x8,		/* FC_LONG */
+			0x4c,		/* FC_EMBEDDED_COMPLEX */
+/* 110 */	0x4,		/* 4 */
+                NdrFcShort( 0xffffff01 ),	/* Offset= -255 (1110) */ /* FIXME!! */
+		0x5b,		/* FC_END */
+
+
+/** PARAMDESC **/
+/* 114 */	0x1a,		/* FC_BOGUS_STRUCT */
+	        0x3,		/* 3 */
+/* 116 */	NdrFcShort( 0x8 ),	/* 8 */
+/* 118 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 120 */	NdrFcShort( 0x6 ),	/* Offset= 6 (126) */
+/* 122 */	0x36,		/* FC_POINTER */
+			0x6,		/* FC_SHORT */
+/* 124 */	0x3e,		/* FC_STRUCTPAD2 */
+			0x5b,		/* FC_END */
+/* 126 */
+			0x13, 0x0,	/* FC_OP */
+/* 128 */	NdrFcShort( 0xffffffe4 ),	/* Offset= -28 (100) */
+
+/** ELEMDESC **/
+/* 130 */
+			0x1a,		/* FC_BOGUS_STRUCT */
+			0x3,		/* 3 */
+/* 132 */	NdrFcShort( 0x10 ),	/* 16 */
+/* 134 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 136 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 138 */	0x4c,		/* FC_EMBEDDED_COMPLEX */
+			0x0,		/* 0 */
+/* 140 */	NdrFcShort( 0xffffffc8 ),	/* Offset= -56 (84) */
+/* 142 */	0x4c,		/* FC_EMBEDDED_COMPLEX */
+			0x0,		/* 0 */
+/* 144 */	NdrFcShort( 0xffffffe2 ),	/* Offset= -30 (114) */
+/* 146 */	0x5c,		/* FC_PAD */
+			0x5b,		/* FC_END */
+
+
+/* 148 */
+			0x1b,		/* FC_CARRAY */
+			0x3,		/* 3 */
+/* 150 */	NdrFcShort( 0x4 ),	/* 4 */
+/* 152 */	0x16,		/* Corr desc:  field pointer, FC_SHORT */
+			0x0,		/*  */
+/* 154 */	NdrFcShort( 0x1e ),	/* 30 */
+/* 156 */	0x8,		/* FC_LONG */
+			0x5b,		/* FC_END */
+
+/* 158 */
+			0x21,		/* FC_BOGUS_ARRAY */
+			0x3,		/* 3 */
+/* 160 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 162 */	0x16,		/* Corr desc:  field pointer, FC_SHORT */
+			0x0,		/*  */
+/* 164 */	NdrFcShort( 0x18 ),	/* 24 */
+/* 166 */	NdrFcLong( 0xffffffff ),	/* -1 */
+/* 170 */	0x4c,		/* FC_EMBEDDED_COMPLEX */
+			0x0,		/* 0 */
+/* 172 */	NdrFcShort( 0xffffffd6 ),	/* Offset= -42 (130) */
+/* 174 */	0x5c,		/* FC_PAD */
+			0x5b,		/* FC_END */
+/** FUNCDESC **/
+/* 176 */	0x1a,		/* FC_BOGUS_STRUCT */
+			0x3,		/* 3 */
+/* 178 */	NdrFcShort( 0x34 ),	/* 52 */
+/* 180 */	NdrFcShort( 0x0 ),	/* 0 */
+/* 182 */	NdrFcShort( 0x14 ),	/* Offset= 20 (202) */
+/* 184 */	0x8,		/* FC_LONG */
+			0x36,		/* FC_POINTER */
+/* 186 */	0x36,		/* FC_POINTER */
+			0xe,		/* FC_ENUM32 */
+/* 188 */	0xe,		/* FC_ENUM32 */
+			0xe,		/* FC_ENUM32 */
+/* 190 */	0x6,		/* FC_SHORT */
+			0x6,		/* FC_SHORT */
+/* 192 */	0x6,		/* FC_SHORT */
+			0x6,		/* FC_SHORT */
+/* 194 */	0x4c,		/* FC_EMBEDDED_COMPLEX */
+			0x0,		/* 0 */
+/* 196 */	NdrFcShort( 0xffffffbe ),	/* Offset= -66 (130) */
+/* 198 */	0x6,		/* FC_SHORT */
+			0x3e,		/* FC_STRUCTPAD2 */
+/* 200 */	0x5c,		/* FC_PAD */
+			0x5b,		/* FC_END */
+/* 202 */
+			0x13, 0x0,	/* FC_OP */
+/* 204 */	NdrFcShort( 0xffffffc8 ),	/* Offset= -56 (148) */
+/* 206 */	
+			0x13, 0x0,	/* FC_OP */
+/* 208 */	NdrFcShort( 0xffffffce ),	/* Offset= -50 (158) */
+
+/** SAFEARRAYBOUND **/
+/* 210 */
+			0x15,		/* FC_STRUCT */
+			0x3,		/* 3 */
+/* 212 */	NdrFcShort( 0x8 ),	/* 8 */
+/* 214 */	0x8,		/* FC_LONG */
+			0x8,		/* FC_LONG */
+/* 216 */	0x5c,		/* FC_PAD */
+			0x5b,		/* FC_END */
+    };
+
+    StubDesc = Object_StubDesc;
+    StubDesc.pFormatTypes = fmtstr_funcdesc;
+
+    memsrc = &fd;
+    memset(&fd, 0, sizeof(fd));
+
+    fd.memid = 0xcafebabe;
+    fd.lprgscode = NULL;
+    fd.lprgelemdescParam = params;
+    params[0].tdesc.vt = VT_PTR;
+    U(params[0].tdesc).lptdesc = &td[0];
+    U(params[0].tdesc).lptdesc->vt = VT_SAFEARRAY;
+    U(*U(params[0].tdesc).lptdesc).lptdesc = &td[1];
+    U(*U(params[0].tdesc).lptdesc).lptdesc->vt = VT_R8;
+    U(params[0]).paramdesc.pparamdescex = NULL;
+    U(params[0]).paramdesc.wParamFlags = 0xbeef;
+
+    params[1].tdesc.vt = VT_I4;
+    /*    U(params[1].tdesc).vt = VT_PTR;
+    U(params[1].tdesc).lptdesc = &td[2];
+    U(params[1].tdesc).lptdesc->vt = VT_SAFEARRAY;
+    U(*U(params[1].tdesc).lptdesc).lptdesc = &td[3];
+    U(*U(params[1].tdesc).lptdesc).lptdesc->vt = VT_R8;*/
+    U(params[1]).paramdesc.pparamdescex = NULL;
+    U(params[1]).paramdesc.wParamFlags = 0xdead;
+    fd.funckind = 0;
+    fd.invkind = 1;
+    fd.callconv = 4;
+    fd.cParams = 2;
+    fd.cParamsOpt = 0;
+    fd.oVft = 8;
+    fd.cScodes = 0;
+    fd.elemdescFunc.tdesc.vt = VT_R8;
+    U(fd.elemdescFunc).paramdesc.pparamdescex = NULL;
+    U(fd.elemdescFunc).paramdesc.wParamFlags = 0xcafe;
+    fd.wFuncFlags = 0;
+
+    NdrClientInitializeNew(&RpcMessage, &StubMsg, &StubDesc, 0);
+
+    StubMsg.BufferLength = 0;
+    StubMsg.PointerLength = 0;
+
+    NdrComplexStructBufferSize( &StubMsg, (unsigned char *)memsrc, fmtstr_funcdesc + 176 );
+    ok(StubMsg.BufferLength >= 96, "buffer size %d\n", StubMsg.BufferLength);
+
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, StubMsg.BufferLength);
+    StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
+
+    ptr = NdrComplexStructMarshall( &StubMsg,  memsrc, fmtstr_funcdesc + 176 );
+   
+    ok(StubMsg.Buffer - StubMsg.BufferStart == 96, "marshaled length %d\n", StubMsg.Buffer - StubMsg.BufferStart);
+
+    /* Compare upto the first embedded union (elemdescFunc) */
+    ok(!memcmp(StubMsg.BufferStart, &fd, 32), "top level differ\n");
+    /* discriminant */
+    ok(!memcmp(StubMsg.BufferStart + 32, &fd.elemdescFunc.tdesc.vt, sizeof(short)), "discrimants differ\n");
+    /* now the vt itself */
+    ok(!memcmp(StubMsg.BufferStart + 34, &fd.elemdescFunc.tdesc.vt, sizeof(short)), "vts differ\n");
+    /* paramdesc */
+    ok(!memcmp(StubMsg.BufferStart + 36, &U(fd.elemdescFunc).paramdesc, sizeof(PARAMDESC)), "paramdesc differ\n");
+    /* param array discrim */
+    ok(!memcmp(StubMsg.BufferStart + 44, &fd.cParams, sizeof(short)), "param array discrim differs\n");
+
+    ok(!memcmp(StubMsg.BufferStart + 48, &params[0].tdesc.vt, sizeof(short)), "param[0] first vt differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 52, &params[0].tdesc, 6), "param[0] first tdesc differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 60, &U(params[0]).paramdesc, 6), "param[0] paramdesc differ\n");
+
+    ok(!memcmp(StubMsg.BufferStart + 68, &params[1].tdesc.vt, sizeof(short)), "param[1] first vt differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 70, &params[1].tdesc.vt, sizeof(short)), "param[1] first tdesc differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 72, &U(params[1]).paramdesc, 6), "param[1] paramdesc differ\n");
+
+    ok(!memcmp(StubMsg.BufferStart + 80, &U(params[0].tdesc).lptdesc->vt, sizeof(short)), "param[0] 2nd vt differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 84, U(params[0].tdesc).lptdesc, 6), "param[0] 2nd tdesc differ\n");
+
+    ok(!memcmp(StubMsg.BufferStart + 92, &U(*U(params[0].tdesc).lptdesc).lptdesc->vt, sizeof(short)), "param[0] 3rd vt differ\n");
+    ok(!memcmp(StubMsg.BufferStart + 94, &U(*U(params[0].tdesc).lptdesc).lptdesc->vt, 2), "param[0] 3rd tdesc differ\n");
+
+    StubMsg.Buffer = StubMsg.BufferStart;
+    StubMsg.MemorySize = 0;
+
+    dst = HeapAlloc(GetProcessHeap(), 0, 1000);
+    NdrComplexStructUnmarshall( &StubMsg, (void*)&dst, fmtstr_funcdesc + 176, 1);
+    ok(dst->cParams == fd.cParams, "params not right\n");
+    ok(U(*U(dst->lprgelemdescParam[0].tdesc).lptdesc).lptdesc->vt == U(*U(params[0].tdesc).lptdesc).lptdesc->vt, "param[0] tdesc differ\n");
 }
 
 struct aligned
@@ -3011,6 +3289,7 @@ START_TEST( ndr_marshall )
     test_simple_types();
     test_nontrivial_pointer_types();
     test_simple_struct();
+    test_complex_struct();
     test_struct_align();
     test_iface_ptr();
     test_fullpointer_xlat();

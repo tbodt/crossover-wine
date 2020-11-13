@@ -32,7 +32,11 @@
 
 #else
 
+#ifdef __i386_on_x86_64__
+#define VTABLE_ADD_FUNC(name) "\t.long " __ASM_THUNK_SYMBOL(#name) "\n"
+#else
 #define VTABLE_ADD_FUNC(name) "\t.long " THISCALL_NAME(name) "\n"
+#endif
 
 #define __ASM_VTABLE(name,funcs) \
     __asm__(".data\n" \
@@ -44,7 +48,7 @@
 
 #endif /* _WIN64 */
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 #define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
     static type_info name ## _type_info = { \
@@ -173,7 +177,7 @@ static void init_ ## name ## _rtti(char *base) \
 #define DEFINE_RTTI_DATA9(name, off, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
     DEFINE_RTTI_DATA(name, off, 9, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name)
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 typedef struct _rtti_base_descriptor
 {

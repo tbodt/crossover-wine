@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -31,6 +32,7 @@
 #include "lm.h"
 #include "secur32_priv.h"
 #include "hmac_md5.h"
+#include "wine/library.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -42,7 +44,8 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 #define MIN_NTLM_AUTH_MINOR_VERSION 0
 #define MIN_NTLM_AUTH_MICRO_VERSION 25
 
-static CHAR ntlm_auth[] = "ntlm_auth";
+static CHAR ntlm_auth[256];
+static char *config_file_option;
 
 /***********************************************************************
  *              QueryCredentialsAttributesA
@@ -225,8 +228,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
 
         phCredential->dwUpper = fCredentialUse;
         phCredential->dwLower = (ULONG_PTR)ntlm_cred;
-        TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n", phCredential->dwUpper,
-              phCredential->dwLower);
+        TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n", (unsigned long)phCredential->dwUpper,
+              (unsigned long)phCredential->dwLower);
         ret = SEC_E_OK;
         break;
 
@@ -462,8 +465,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     {
         static char helper_protocol[] = "--helper-protocol=ntlmssp-client-1";
         static CHAR credentials_argv[] = "--use-cached-creds";
-        SEC_CHAR *client_argv[5];
-        int pwlen = 0;
+        SEC_CHAR * HOSTPTR client_argv[6];
+        int pwlen = 0, arg = 0;
 
         TRACE("First time in ISC()\n");
 
@@ -484,8 +487,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
             goto isc_end;
         }
 
-        client_argv[0] = ntlm_auth;
-        client_argv[1] = helper_protocol;
+        client_argv[arg++] = ntlm_auth;
+        client_argv[arg++] = helper_protocol;
+        if (config_file_option) client_argv[arg++] = config_file_option;
         if (!ntlm_cred->username_arg && !ntlm_cred->domain_arg)
         {
             LPWKSTA_USER_INFO_1 ui = NULL;
@@ -525,9 +529,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
                 CredFree(cred);
 
-                client_argv[2] = username;
-                client_argv[3] = domain;
-                client_argv[4] = NULL;
+                client_argv[arg++] = username;
+                client_argv[arg++] = domain;
             }
             else
             {
@@ -542,17 +545,16 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
                 TRACE("using cached credentials\n");
 
-                client_argv[2] = username;
-                client_argv[3] = credentials_argv;
-                client_argv[4] = NULL;
+                client_argv[arg++] = username;
+                client_argv[arg++] = credentials_argv;
             }
         }
         else
         {
-            client_argv[2] = ntlm_cred->username_arg;
-            client_argv[3] = ntlm_cred->domain_arg;
-            client_argv[4] = NULL;
+            client_argv[arg++] = ntlm_cred->username_arg;
+            client_argv[arg++] = ntlm_cred->domain_arg;
         }
+        client_argv[arg] = NULL;
 
         if((ret = fork_helper(&helper, ntlm_auth, client_argv)) != SEC_E_OK)
             goto isc_end;
@@ -979,8 +981,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcceptSecurityContext(
     if(phContext == NULL)
     {
         static CHAR server_helper_protocol[] = "--helper-protocol=squid-2.5-ntlmssp";
-        SEC_CHAR *server_argv[] = { ntlm_auth,
+        SEC_CHAR * HOSTPTR server_argv[] = { ntlm_auth,
             server_helper_protocol,
+            config_file_option,
             NULL };
 
         if (!phCredential)
@@ -1993,15 +1996,60 @@ void SECUR32_initNTLMSP(void)
     PNegoHelper helper;
     static CHAR version[] = "--version";
 
-    SEC_CHAR *args[] = {
+    SEC_CHAR * HOSTPTR args[] = {
         ntlm_auth,
         version,
         NULL };
+
+    strcpy(ntlm_auth, "ntlm_auth");
 
     if(fork_helper(&helper, ntlm_auth, args) != SEC_E_OK)
         helper = NULL;
     else
         check_version(helper);
+
+    /* CodeWeavers feature: fall back to our shipped ntlm_auth if a suitable
+     * system version isn't found */
+    if( (!helper ||
+        ((helper->major <  MIN_NTLM_AUTH_MAJOR_VERSION) ||
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor < MIN_NTLM_AUTH_MINOR_VERSION) ||
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor == MIN_NTLM_AUTH_MINOR_VERSION  &&
+         helper->micro < MIN_NTLM_AUTH_MICRO_VERSION))) &&
+         getenv("CX_ROOT") )
+    {
+        static const char config_file_format[] = "--configfile=%s/smb.conf";
+        const char * HOSTPTR datadir = wine_get_data_dir();
+
+        cleanup_helper(helper);
+
+        TRACE("falling back to CrossOver version of ntlm_auth\n");
+
+        strcpy(ntlm_auth, getenv("CX_ROOT"));
+        strcat(ntlm_auth, "/bin/cxntlm_auth");
+
+#ifdef __ANDROID__  /* the bin dir is different on Android */
+        if (getenv( "WINELOADER" ))
+        {
+            char *p;
+            strcpy(ntlm_auth, getenv("WINELOADER"));
+            if (!(p = strrchr( ntlm_auth, '/' ))) p = ntlm_auth;
+            strcpy( p, "/cxntlm_auth");
+        }
+#endif
+
+        if(fork_helper(&helper, ntlm_auth, args) != SEC_E_OK)
+            helper = NULL;
+        else
+            check_version(helper);
+
+        if (datadir)
+        {
+            config_file_option = HeapAlloc( GetProcessHeap(), 0, sizeof(config_file_format) + strlen(datadir) );
+            sprintf( config_file_option, config_file_format, datadir );
+        }
+    }
 
     if( helper &&
         ((helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||

@@ -19,6 +19,8 @@
 #ifndef __WINE_SAL_H__
 #define __WINE_SAL_H__
 
+#include "wine/winheader_enter.h"
+
 
 #define _Always_(exp)
 
@@ -228,5 +230,7 @@
 #define _Success_(exp)
 
 #define _When_(exp1, exp2)
+
+#include "wine/winheader_exit.h"
 
 #endif

@@ -18,6 +18,9 @@
 
 #ifndef _WDMDDK_
 #define _WDMDDK_
+
+#include "wine/winheader_enter.h"
+
 #define _NTDDK_
 
 #include <ntstatus.h>
@@ -1365,7 +1368,7 @@ typedef struct _LOOKASIDE_LIST_EX
 typedef struct LOOKASIDE_ALIGN _NPAGED_LOOKASIDE_LIST
 {
     GENERAL_LOOKASIDE L;
-#if defined(__i386__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     KSPIN_LOCK Lock__ObsoleteButDoNotDelete;
 #endif
 } NPAGED_LOOKASIDE_LIST, *PNPAGED_LOOKASIDE_LIST;
@@ -1373,7 +1376,7 @@ typedef struct LOOKASIDE_ALIGN _NPAGED_LOOKASIDE_LIST
 typedef struct LOOKASIDE_ALIGN _PAGED_LOOKASIDE_LIST
 {
     GENERAL_LOOKASIDE L;
-#if defined(__i386__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     FAST_MUTEX Lock__ObsoleteButDoNotDelete;
 #endif
 } PAGED_LOOKASIDE_LIST, *PPAGED_LOOKASIDE_LIST;
@@ -1616,7 +1619,7 @@ NTSTATUS  WINAPI IoSetDeviceInterfaceState(UNICODE_STRING*,BOOLEAN);
 NTSTATUS  WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT,ULONG);
 
 void    FASTCALL KeAcquireInStackQueuedSpinLockAtDpcLevel(KSPIN_LOCK*,KLOCK_QUEUE_HANDLE*);
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 void      WINAPI KeAcquireSpinLock(KSPIN_LOCK*,KIRQL*);
 #else
 #define KeAcquireSpinLock( lock, irql ) *(irql) = KeAcquireSpinLockRaiseToDpc( lock )
@@ -1807,5 +1810,7 @@ static inline void ExInitializeFastMutex( FAST_MUTEX *mutex )
     mutex->Contention = 0;
     KeInitializeEvent( &mutex->Event, SynchronizationEvent, FALSE );
 }
+
+#include "wine/winheader_exit.h"
 
 #endif

@@ -49,7 +49,7 @@ void WINAPI FreeLibraryAndExitThread(HINSTANCE hLibModule, DWORD dwExitCode)
  */
 BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     NTSTATUS status = NtSetContextThread( handle, (const CONTEXT *)context );
 #elif defined(__x86_64__)
     NTSTATUS status = RtlWow64SetThreadContext( handle, context );
@@ -65,7 +65,7 @@ BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)
  */
 BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     NTSTATUS status = NtGetContextThread( handle, (CONTEXT *)context );
 #elif defined(__x86_64__)
     NTSTATUS status = RtlWow64GetThreadContext( handle, context );
@@ -75,6 +75,14 @@ BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
 }
+
+#ifdef __i386_on_x86_64__
+/* We need a direct 32-bit implementation of this in case the caller is requesting
+   its own context.  Thunking to 64-bit mode would give us a context that won't
+   make any sense to the caller. */
+__ASM_THUNK_STDCALL( Wow64GetThreadContext, 8,
+                     "jmp " __ASM_THUNK_STDCALL_SYMBOL("GetThreadContext", 8) )
+#endif
 
 
 /**********************************************************************
@@ -147,6 +155,10 @@ DWORD WINAPI KERNEL32_GetCurrentProcessId(void)
 {
     return HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess);
 }
+
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_GetCurrentProcessId, 0, ".byte 0x64\n\tmovl 0x20,%eax\n\tret" )
+#endif
 
 /***********************************************************************
  *		GetCurrentThreadId (KERNEL32.@)

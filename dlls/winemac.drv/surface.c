@@ -332,7 +332,7 @@ void set_window_surface(macdrv_window window, struct window_surface *window_surf
  *            must not use Win32 or Wine functions, including debug
  *            logging.
  */
-int get_surface_blit_rects(void *window_surface, const CGRect **rects, int *count)
+int get_surface_blit_rects(void * WIN32PTR window_surface, const CGRect **rects, int *count)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -365,7 +365,7 @@ int get_surface_blit_rects(void *window_surface, const CGRect **rects, int *coun
  *            must not use Win32 or Wine functions, including debug
  *            logging.
  */
-CGImageRef create_surface_image(void *window_surface, CGRect *rect, int copy_data)
+CGImageRef create_surface_image(void * WIN32PTR window_surface, CGRect *rect, int copy_data)
 {
     CGImageRef cgimage = NULL;
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
@@ -429,9 +429,9 @@ void surface_clip_to_visible_rect(struct window_surface *window_surface, const R
         HRGN region;
 
         rect = *visible_rect;
-        OffsetRect(&rect, -rect.left, -rect.top);
+        OffsetRect(TRUNCCAST(RECT * WIN32PTR, &rect), -rect.left, -rect.top);
 
-        if ((region = CreateRectRgnIndirect(&rect)))
+        if ((region = CreateRectRgnIndirect(TRUNCCAST(RECT * WIN32PTR, &rect))))
         {
             CombineRgn(surface->drawn, surface->drawn, region, RGN_AND);
             DeleteObject(region);

@@ -652,7 +652,7 @@ BOOL WINAPI GetNamedPipeHandleStateW(
 
     if (lpUsername && nUsernameMaxSize)
     {
-        const char *username = wine_get_user_name();
+        const char * HOSTPTR username = wine_get_user_name();
         int len = MultiByteToWideChar(CP_UNIXCP, 0, username, -1, lpUsername, nUsernameMaxSize);
         if (!len) *lpUsername = 0;
     }
@@ -973,5 +973,91 @@ __ASM_STDCALL_FUNC(InterlockedDecrement, 4,
                   "lock; xaddl %eax,(%edx)\n\t"
                   "decl %eax\n\t"
                   "ret $4")
+
+#elif defined(__i386_on_x86_64__)
+
+/***********************************************************************
+ *		InterlockedCompareExchange (KERNEL32.@)
+ */
+/* LONG WINAPI InterlockedCompareExchange( PLONG dest, LONG xchg, LONG compare ); */
+__ASM_STDCALL_FUNC(InterlockedCompareExchange, 12,
+                   "movl "__ASM_EXTRA_DIST"+12(%esp),%eax\n\t"
+                   "movl "__ASM_EXTRA_DIST"+8(%esp),%ecx\n\t"
+                   "movl "__ASM_EXTRA_DIST"+4(%esp),%edx\n\t"
+                   "lock; cmpxchgl %ecx,(%edx)\n\t"
+                   "retq")
+
+/***********************************************************************
+ *		InterlockedExchange (KERNEL32.@)
+ */
+/* LONG WINAPI InterlockedExchange( PLONG dest, LONG val ); */
+__ASM_STDCALL_FUNC(InterlockedExchange, 8,
+                   "movl "__ASM_EXTRA_DIST"+8(%esp),%eax\n\t"
+                   "movl "__ASM_EXTRA_DIST"+4(%esp),%edx\n\t"
+                   "lock; xchgl %eax,(%edx)\n\t"
+                   "retq")
+
+/***********************************************************************
+ *		InterlockedExchangeAdd (KERNEL32.@)
+ */
+/* LONG WINAPI InterlockedExchangeAdd( PLONG dest, LONG incr ); */
+__ASM_STDCALL_FUNC(InterlockedExchangeAdd, 8,
+                   "movl "__ASM_EXTRA_DIST"+8(%esp),%eax\n\t"
+                   "movl "__ASM_EXTRA_DIST"+4(%esp),%edx\n\t"
+                   "lock; xaddl %eax,(%edx)\n\t"
+                   "retq")
+
+/***********************************************************************
+ *		InterlockedIncrement (KERNEL32.@)
+ */
+/* LONG WINAPI InterlockedIncrement( PLONG dest ); */
+__ASM_STDCALL_FUNC(InterlockedIncrement, 4,
+                   "movl "__ASM_EXTRA_DIST"+4(%esp),%edx\n\t"
+                   "movl $1,%eax\n\t"
+                   "lock; xaddl %eax,(%edx)\n\t"
+                   "incl %eax\n\t"
+                   "retq")
+
+/***********************************************************************
+ *		InterlockedDecrement (KERNEL32.@)
+ */
+__ASM_STDCALL_FUNC(InterlockedDecrement, 4,
+                   "movl "__ASM_EXTRA_DIST"+4(%esp),%edx\n\t"
+                   "movl $-1,%eax\n\t"
+                   "lock; xaddl %eax,(%edx)\n\t"
+                   "decl %eax\n\t"
+                   "retq")
+
+/***********************************************************************
+ *		32-bit implements
+ */
+__ASM_THUNK_STDCALL(InterlockedCompareExchange, 12,
+                    "movl 12(%esp),%eax\n\t"
+                    "movl 8(%esp),%ecx\n\t"
+                    "movl 4(%esp),%edx\n\t"
+                    "lock; cmpxchgl %ecx,(%edx)\n\t"
+                    "ret $12")
+__ASM_THUNK_STDCALL(InterlockedExchange, 8,
+                    "movl 8(%esp),%eax\n\t"
+                    "movl 4(%esp),%edx\n\t"
+                    "lock; xchgl %eax,(%edx)\n\t"
+                    "ret $8")
+__ASM_THUNK_STDCALL(InterlockedExchangeAdd, 8,
+                    "movl 8(%esp),%eax\n\t"
+                    "movl 4(%esp),%edx\n\t"
+                    "lock; xaddl %eax,(%edx)\n\t"
+                    "ret $8")
+__ASM_THUNK_STDCALL(InterlockedIncrement, 4,
+                    "movl 4(%esp),%edx\n\t"
+                    "movl $1,%eax\n\t"
+                    "lock; xaddl %eax,(%edx)\n\t"
+                    "incl %eax\n\t"
+                    "ret $4")
+__ASM_THUNK_STDCALL(InterlockedDecrement, 4,
+                    "movl 4(%esp),%edx\n\t"
+                    "movl $-1,%eax\n\t"
+                    "lock; xaddl %eax,(%edx)\n\t"
+                    "decl %eax\n\t"
+                    "ret $4")
 
 #endif  /* __i386__ */

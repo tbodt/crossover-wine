@@ -107,7 +107,7 @@ static HRESULT WINAPI XAPOFX_GetRegistrationProperties(IXAPO *iface,
         return hr;
 
     /* TODO: check for version == 20 and use XAPO20_REGISTRATION_PROPERTIES */
-    *props = (XAPO_REGISTRATION_PROPERTIES*) fprops;
+    *props = ADDRSPACECAST(XAPO_REGISTRATION_PROPERTIES *, fprops);
     return hr;
 }
 
@@ -116,11 +116,17 @@ static HRESULT WINAPI XAPOFX_IsInputFormatSupported(IXAPO *iface,
         WAVEFORMATEX **supported_fmt)
 {
     XA2XAPOFXImpl *This = impl_from_IXAPO(iface);
+    FAudioWaveFormatEx *supported_fa_fmt;
+    HRESULT hr;
+
     TRACE("%p, %p, %p, %p\n", This, output_fmt, input_fmt, supported_fmt);
-    return This->fapo->IsInputFormatSupported(This->fapo,
+    hr = This->fapo->IsInputFormatSupported(This->fapo,
             (const FAudioWaveFormatEx *)output_fmt,
             (const FAudioWaveFormatEx *)input_fmt,
-            (FAudioWaveFormatEx **)supported_fmt);
+            supported_fmt ? &supported_fa_fmt : NULL);
+    if (supported_fmt)
+        *supported_fmt = ADDRSPACECAST(WAVEFORMATEX *, supported_fa_fmt);
+    return hr;
 }
 
 static HRESULT WINAPI XAPOFX_IsOutputFormatSupported(IXAPO *iface,
@@ -128,11 +134,17 @@ static HRESULT WINAPI XAPOFX_IsOutputFormatSupported(IXAPO *iface,
         WAVEFORMATEX **supported_fmt)
 {
     XA2XAPOFXImpl *This = impl_from_IXAPO(iface);
+    FAudioWaveFormatEx *supported_fa_fmt;
+    HRESULT hr;
+
     TRACE("%p, %p, %p, %p\n", This, input_fmt, output_fmt, supported_fmt);
-    return This->fapo->IsOutputFormatSupported(This->fapo,
+    hr = This->fapo->IsOutputFormatSupported(This->fapo,
             (const FAudioWaveFormatEx *)input_fmt,
             (const FAudioWaveFormatEx *)output_fmt,
-            (FAudioWaveFormatEx **)supported_fmt);
+            supported_fmt ? &supported_fa_fmt : NULL);
+    if (supported_fmt)
+        *supported_fmt = ADDRSPACECAST(WAVEFORMATEX *, supported_fa_fmt);
+    return hr;
 }
 
 static HRESULT WINAPI XAPOFX_Initialize(IXAPO *iface, const void *data,

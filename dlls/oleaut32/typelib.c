@@ -8826,14 +8826,15 @@ static ULONG WINAPI ITypeComp_fnRelease(ITypeComp * iface)
     return ITypeInfo2_Release(&This->ITypeInfo2_iface);
 }
 
-static HRESULT WINAPI ITypeComp_fnBind(
+static HRESULT ITypeComp_internalBind(
     ITypeComp * iface,
     OLECHAR * szName,
     ULONG lHash,
     WORD wFlags,
     ITypeInfo ** ppTInfo,
     DESCKIND * pDescKind,
-    BINDPTR * pBindPtr)
+    BINDPTR * pBindPtr,
+    BOOL dispinterface)
 {
     ITypeInfoImpl *This = info_impl_from_ITypeComp(iface);
     const TLBFuncDesc *pFDesc;
@@ -8863,7 +8864,7 @@ static HRESULT WINAPI ITypeComp_fnBind(
         HRESULT hr = TLB_AllocAndInitFuncDesc(
             &pFDesc->funcdesc,
             &pBindPtr->lpfuncdesc,
-            This->typeattr.typekind == TKIND_DISPATCH);
+            dispinterface || This->typeattr.typekind == TKIND_DISPATCH);
         if (FAILED(hr))
             return hr;
         *pDescKind = DESCKIND_FUNCDESC;
@@ -8896,7 +8897,19 @@ static HRESULT WINAPI ITypeComp_fnBind(
         }
         if (SUCCEEDED(hr))
         {
-            hr = ITypeComp_Bind(pTComp, szName, lHash, wFlags, ppTInfo, pDescKind, pBindPtr);
+            /* CROSSOVER HACK: Bug 5536
+
+            Excel includes some dispatch types that "implement" interfaces but
+            really only implement the interface functions as dispatch functions.
+            I believe this is generally true of dispatch types that implement
+            interfaces and are not dual. Windows returns funcdesc's for dispatch
+            functions instead of virtual functions for Excel's types, but due to
+            an unrelated bug I can't write a good test for it. Also, this is a
+            really hacky way to do it. */
+            if (This->typeattr.typekind == TKIND_DISPATCH &&
+                (This->typeattr.wTypeFlags & TYPEFLAG_FDUAL) == 0)
+                dispinterface = 1;
+            hr = ITypeComp_internalBind(pTComp, szName, lHash, wFlags, ppTInfo, pDescKind, pBindPtr, dispinterface);
             ITypeComp_Release(pTComp);
             if (SUCCEEDED(hr) && *pDescKind == DESCKIND_FUNCDESC &&
                     This->typeattr.typekind == TKIND_DISPATCH)
@@ -8913,6 +8926,18 @@ static HRESULT WINAPI ITypeComp_fnBind(
         hr = S_OK;
     TRACE("did not find member with name %s, flags 0x%x\n", debugstr_w(szName), wFlags);
     return hr;
+}
+
+static HRESULT WINAPI ITypeComp_fnBind(
+    ITypeComp * iface,
+    OLECHAR * szName,
+    ULONG lHash,
+    WORD wFlags,
+    ITypeInfo ** ppTInfo,
+    DESCKIND * pDescKind,
+    BINDPTR * pBindPtr)
+{
+    return ITypeComp_internalBind(iface, szName, lHash, wFlags, ppTInfo, pDescKind, pBindPtr, 0);
 }
 
 static HRESULT WINAPI ITypeComp_fnBindType(

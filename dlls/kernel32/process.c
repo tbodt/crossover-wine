@@ -113,6 +113,44 @@ __ASM_GLOBAL_FUNC( __wine_start_process,
                    "pushl %ebx\n\t"  /* arg */
                    "pushl %eax\n\t"  /* entry */
                    "call " __ASM_NAME("start_process") )
+
+#elif defined(__i386_on_x86_64__)
+extern DWORD CDECL call_process_entry_impl( PEB *peb, LPTHREAD_START_ROUTINE entry );
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(call_process_entry_impl),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl 4(%ebp)\n\t"  /* deliberately mis-align the stack by 8, Doom 3 needs this */
+                     "pushl 4(%ebp)\n\t"  /* Driller expects readable address at this offset */
+                     "pushl 4(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call *12(%ebp)\n\t"
+                     "leave\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret" )
+
+static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
+{
+    if (wine_is_thunk32to64( entry ))
+        return entry(peb);
+    else
+        return WINE_CALL_IMPL32(call_process_entry_impl)( peb, entry );
+}
+
+extern void CDECL DECLSPEC_HIDDEN __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb );
+__ASM_STDCALL_FUNC32( __ASM_THUNK_NAME(__wine_start_process), 8,
+                      "pushl %ebp\n\t"
+                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                      __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                      "movl %esp,%ebp\n\t"
+                      __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                      "pushl %ebx\n\t"  /* arg */
+                      "pushl %eax\n\t"  /* entry */
+                      "call " __ASM_THUNK_SYMBOL("start_process") )
+
 #else
 static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
 {
@@ -125,7 +163,7 @@ static inline DWORD call_process_entry( PEB *peb, LPTHREAD_START_ROUTINE entry )
  *
  * Startup routine of a new process. Runs on the new process stack.
  */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 void CDECL start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
 #else
 void CDECL __wine_start_process( LPTHREAD_START_ROUTINE entry, PEB *peb )
@@ -302,12 +340,28 @@ __ASM_STDCALL_FUNC( ExitProcess, 4, /* Shrinker depend on this particular ExitPr
                    "ret $4" )
 #else
 
+#if defined(__i386_on_x86_64__)
+
+/* Shrinker depends on this particular 32-bit ExitProcess implementation.
+   Because of that, we can't use our magic thunk signature with its hotpatch prolog. */
+__ASM_STDCALL_FUNC32( __ASM_THUNK_NAME(ExitProcess), 4,
+                     "pushl %ebp\n\t"
+                     ".byte 0x8B, 0xEC\n\t" /* movl %esp, %ebp */
+                     ".byte 0x6A, 0x00\n\t" /* pushl $0 */
+                     ".byte 0x68, 0x00, 0x00, 0x00, 0x00\n\t" /* pushl $0 - 4 bytes immediate */
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_STDCALL_SYMBOL("RtlExitUserProcess", 4) "\n\t"
+                     "leave\n\t"
+                     "ret $4" )
+
+#endif
+
 void WINAPI ExitProcess( DWORD status )
 {
     RtlExitUserProcess( status );
 }
 
-#endif
+#endif /* __i386__ */
 
 /***********************************************************************
  * GetExitCodeProcess           [KERNEL32.@]
@@ -1154,3 +1208,25 @@ BOOL WINAPI BaseFlushAppcompatCache(void)
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
+
+
+#ifdef __i386_on_x86_64__
+/***********************************************************************
+ *		ReadProcessMemory HOSTPTR overload (KERNEL32.@)
+ */
+BOOL WINAPI ReadProcessMemory( HANDLE process, const void * HOSTPTR addr, void *buffer, SIZE_T size,
+                               SIZE_T * HOSTPTR bytes_read ) __attribute__((overloadable))
+{
+    return set_ntstatus( NtReadVirtualMemory( process, addr, buffer, size, bytes_read ) );
+}
+
+
+/***********************************************************************
+ *           WriteProcessMemory HOSTPTR overload    		(KERNEL32.@)
+ */
+BOOL WINAPI WriteProcessMemory( HANDLE process, void * HOSTPTR addr, LPCVOID buffer, SIZE_T size,
+                                SIZE_T *bytes_written ) __attribute__((overloadable))
+{
+    return set_ntstatus( NtWriteVirtualMemory( process, addr, buffer, size, bytes_written ) );
+}
+#endif

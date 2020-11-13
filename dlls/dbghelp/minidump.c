@@ -615,6 +615,31 @@ __ASM_GLOBAL_FUNC( have_x86cpuid,
                    "xorl %ecx,%eax\n\t"
                    "andl $0x00200000,%eax\n\t"
                    "ret" )
+#elif defined(__i386_on_x86_64__)
+extern void do_x86cpuid(unsigned int ax, unsigned int *p);
+__ASM_GLOBAL_FUNC( do_x86cpuid,
+                   "pushq %rbx\n\t"
+                   "movl %edi,%eax\n\t"
+                   "cpuid\n\t"
+                   "movl %eax,(%esi)\n\t"
+                   "movl %ebx,4(%esi)\n\t"
+                   "movl %ecx,8(%esi)\n\t"
+                   "movl %edx,12(%esi)\n\t"
+                   "popq %rbx\n\t"
+                   "retq" )
+extern int have_x86cpuid(void);
+__ASM_GLOBAL_FUNC( have_x86cpuid,
+                   "pushfq\n\t"
+                   "pushfq\n\t"
+                   "movq (%rsp),%rcx\n\t"
+                   "xorq $0x0000000000200000,(%rsp)\n\t"
+                   "popfq\n\t"
+                   "pushfq\n\t"
+                   "popq %rax\n\t"
+                   "popfq\n\t"
+                   "xorq %rcx,%rax\n\t"
+                   "andq $0x0000000000200000,%rax\n\t"
+                   "retq" )
 #else
 static void do_x86cpuid(unsigned int ax, unsigned int *p)
 {

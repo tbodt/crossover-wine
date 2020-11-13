@@ -362,7 +362,7 @@ static inline struct dwrite_typography *impl_from_IDWriteTypography(IDWriteTypog
     return CONTAINING_RECORD(iface, struct dwrite_typography, IDWriteTypography_iface);
 }
 
-static inline const char *debugstr_rundescr(const DWRITE_GLYPH_RUN_DESCRIPTION *descr)
+static inline const char * HOSTPTR debugstr_rundescr(const DWRITE_GLYPH_RUN_DESCRIPTION *descr)
 {
     return wine_dbg_sprintf("[%u,%u)", descr->textPosition, descr->textPosition + descr->stringLength);
 }

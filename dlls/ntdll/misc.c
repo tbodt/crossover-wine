@@ -21,6 +21,7 @@
 
 #include "config.h"
 
+#include <assert.h>
 #include <time.h>
 #include <math.h>
 #ifdef HAVE_SYS_UTSNAME_H
@@ -52,6 +53,39 @@ LPCSTR debugstr_us( const UNICODE_STRING *us )
     return debugstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
 }
 
+#ifdef __i386_on_x86_64__
+static RTL_RUN_ONCE init_once = RTL_RUN_ONCE_INIT;
+static char wine_version[128];
+static char wine_build_id[128];
+
+/* Initialize string buffers for 32on64 mode */
+static DWORD WINAPI init_strings(RTL_RUN_ONCE *once, void *param, void **context)
+{
+    strcpy(wine_version, wine_get_version());
+    strcpy(wine_build_id, wine_get_build_id());
+    return TRUE;
+}
+
+/*********************************************************************
+ *                  wine_get_version   (NTDLL.@)
+ */
+const char * CDECL NTDLL_wine_get_version(void)
+{
+    RtlRunOnceExecuteOnce(&init_once, init_strings, NULL, NULL);
+    return wine_version;
+}
+
+/*********************************************************************
+ *                  wine_get_build_id   (NTDLL.@)
+ */
+const char * CDECL NTDLL_wine_get_build_id(void)
+{
+    RtlRunOnceExecuteOnce(&init_once, init_strings, NULL, NULL);
+    return wine_build_id;
+}
+
+#else
+
 /*********************************************************************
  *                  wine_get_version   (NTDLL.@)
  */
@@ -67,6 +101,8 @@ const char * CDECL NTDLL_wine_get_build_id(void)
 {
     return wine_get_build_id();
 }
+
+#endif
 
 /*********************************************************************
  *                  wine_get_host_version   (NTDLL.@)
@@ -186,7 +222,7 @@ double CDECL NTDLL_tan( double d )
     return tan( d );
 }
 
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
 
 #define FPU_DOUBLE(var) double var; \
     __asm__ __volatile__( "fstpl %0;fwait" : "=m" (var) : )
@@ -283,7 +319,7 @@ NTDLL_mergesort( void *arr, void *barr, size_t elemsize, int(__cdecl *compar)(co
 /*********************************************************************
  *                  qsort   (NTDLL.@)
  */
-void __cdecl NTDLL_qsort( void *base, size_t nmemb, size_t size,
+void __cdecl NTDLL_qsort( void *base, SIZE_T nmemb, SIZE_T size,
                           int(__cdecl *compar)(const void *, const void *) )
 {
     void *secondarr;
@@ -297,11 +333,11 @@ void __cdecl NTDLL_qsort( void *base, size_t nmemb, size_t size,
  *                  bsearch   (NTDLL.@)
  */
 void * __cdecl
-NTDLL_bsearch( const void *key, const void *base, size_t nmemb,
-               size_t size, int (__cdecl *compar)(const void *, const void *) )
+NTDLL_bsearch( const void *key, const void *base, SIZE_T nmemb,
+               SIZE_T size, int (__cdecl *compar)(const void *, const void *) )
 {
     ssize_t min = 0;
-    ssize_t max = nmemb - 1;
+    ssize_t max = (ssize_t)nmemb - 1;
 
     while (min <= max)
     {
@@ -322,7 +358,7 @@ NTDLL_bsearch( const void *key, const void *base, size_t nmemb,
  *                  _lfind   (NTDLL.@)
  */
 void * __cdecl _lfind( const void *key, const void *base, unsigned int *nmemb,
-                       size_t size, int(__cdecl *compar)(const void *, const void *) )
+                       SIZE_T size, int(__cdecl *compar)(const void *, const void *) )
 {
     size_t i, n = *nmemb;
 

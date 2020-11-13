@@ -69,7 +69,7 @@ static struct wine_preload_info preload_info[] =
 {
     /* On macOS, we allocate the low 64k area in two steps because PAGEZERO
      * might not always be available. */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     { (void *)0x00000000, 0x00001000 },  /* first page */
     { (void *)0x00001000, 0x0000f000 },  /* low 64k */
     { (void *)0x00010000, 0x00100000 },  /* DOS area */
@@ -79,7 +79,7 @@ static struct wine_preload_info preload_info[] =
     { (void *)0x000000010000, 0x00100000 },  /* DOS area */
     { (void *)0x000000110000, 0x67ef0000 },  /* low memory area */
     { (void *)0x00007ff00000, 0x000f0000 },  /* shared user data */
-    { (void *)0x7ffef0000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
+    { (void *)0x7ffd00000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
 #endif /* __i386__ */
     { 0, 0 },                            /* PE exe range set with WINEPRELOADRESERVE */
     { 0, 0 }                             /* end of list */
@@ -183,7 +183,7 @@ __ASM_GLOBAL_FUNC( start,
                    "\tmovl $0,%ebp\n"
                    "\tjmpl *%eax\n" )
 
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 static const size_t page_size = 0x1000;
 static const size_t page_mask = 0xfff;
@@ -295,6 +295,41 @@ MAKE_FUNCPTR(dladdr);
 extern int _dyld_func_lookup( const char *dyld_func_name, void **address );
 
 /* replacement for libc functions */
+
+#if defined(__i386__) || defined(__i386_on_x86_64__) /* CrossOver Hack #16371 */
+static inline size_t wld_strlen( const char *str )
+{
+    size_t len;
+    for (len = 0; str[len]; ++len)
+        /* nothing */;
+    return len;
+}
+
+static inline int wld_tolower( int c )
+{
+    if ('A' <= c && c <= 'Z')
+        return c - 'A' + 'a';
+    return c;
+}
+
+static inline int wld_strncasecmp( const char *str1, const char *str2, size_t len )
+{
+    if (len <= 0) return 0;
+    while ((--len > 0) && *str1 && (wld_tolower(*str1) == wld_tolower(*str2))) { str1++; str2++; }
+    return wld_tolower(*str1) - wld_tolower(*str2);
+}
+
+static inline const char * wld_strcasestr( const char *haystack, const char *needle )
+{
+    size_t len = wld_strlen(needle);
+    for ( ; *haystack ; ++haystack)
+    {
+        if (!wld_strncasecmp(haystack, needle, len))
+            return haystack;
+    }
+    return NULL;
+}
+#endif
 
 static int wld_strncmp( const char *str1, const char *str2, size_t len )
 {
@@ -603,6 +638,19 @@ void *wld_start( void *stack, int *is_unix_thread )
     LOAD_POSIX_DYLD_FUNC( dlsym );
     LOAD_POSIX_DYLD_FUNC( dladdr );
     LOAD_MACHO_DYLD_FUNC( _dyld_get_image_slide );
+
+#if defined(__i386__) || defined(__i386_on_x86_64__) /* CrossOver Hack #16371 */
+    {
+        const char *qw;
+        if (*pargc >= 3 && (qw = wld_strcasestr(argv[2], "qw")) && wld_strcasestr(qw + 2, "patch.exe"))
+        {
+            if (preload_info[3].addr == (void *)0x00110000 && preload_info[3].size == 0x67ef0000)
+                preload_info[3].size = 0x70ef0000;
+            else
+                wld_printf( "warning: detected Quicken patcher (%s) but preload_info is not as expected; not applying adjustment", argv[2] );
+        }
+    }
+#endif
 
     /* reserve memory that Wine needs */
     if (reserve) preload_reserve( reserve );

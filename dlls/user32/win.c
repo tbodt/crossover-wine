@@ -445,10 +445,16 @@ static void send_parent_notify( HWND hwnd, UINT msg )
  *
  * Trigger an update of the window's driver state and surface.
  */
-static void update_window_state( HWND hwnd )
+void update_window_state( HWND hwnd )
 {
     DPI_AWARENESS_CONTEXT context;
     RECT window_rect, client_rect, valid_rects[2];
+
+    if (!WIN_IsCurrentThread( hwnd ))
+    {
+        PostMessageW( hwnd, WM_WINE_UPDATEWINDOWSTATE, 0, 0 );
+        return;
+    }
 
     context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
     WIN_GetRectangles( hwnd, COORDS_PARENT, &window_rect, &client_rect );
@@ -1355,6 +1361,29 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
           cs->dwExStyle, cs->style, cs->x, cs->y, cs->cx, cs->cy,
           cs->hwndParent, cs->hMenu, cs->hInstance, cs->lpCreateParams );
     if(TRACE_ON(win)) dump_window_styles( cs->style, cs->dwExStyle );
+
+#ifdef __ANDROID__
+    if (1)
+    {
+        static const WCHAR quicken_hack_classW[] =
+            {'e','o','.','w','e','b','b','r','o','w','s','e','r','.','r','o','o','t',0};
+        if (unicode && !IS_INTRESOURCE(className) && !strcmpW(className, quicken_hack_classW))
+        {
+            if ((cs->style & (WS_CHILD|WS_POPUP)) == WS_CHILD &&
+                cs->hwndParent && cs->hwndParent != GetDesktopWindow())
+            {
+                DWORD process_id = GetCurrentProcessId();
+                GetWindowThreadProcessId(cs->hwndParent, &process_id);
+                if (process_id != GetCurrentProcessId())
+                {
+                    FIXME("HACK: parent is in a different process, setting parent to NULL\n");
+                    cs->style &= ~WS_CHILD;
+                    cs->hwndParent = NULL;
+                }
+            }
+        }
+    }
+#endif
 
     /* Fix the styles for MDI children */
     if (cs->dwExStyle & WS_EX_MDICHILD)
@@ -2366,7 +2395,7 @@ static LONG_PTR WIN_GetWindowLong( HWND hwnd, INT offset, UINT size, BOOL unicod
                 case GWL_STYLE:      retvalue = reply->old_style; break;
                 case GWL_EXSTYLE:    retvalue = reply->old_ex_style; break;
                 case GWLP_ID:        retvalue = reply->old_id; break;
-                case GWLP_HINSTANCE: retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance ); break;
+                case GWLP_HINSTANCE: retvalue = TRUNCCAST(ULONG_PTR, wine_server_get_ptr( reply->old_instance )); break;
                 case GWLP_USERDATA:  retvalue = reply->old_user_data; break;
                 default:
                     if (offset >= 0) retvalue = get_win_data( &reply->old_extra_value, size );
@@ -2622,7 +2651,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
                 break;
             case GWLP_HINSTANCE:
                 wndPtr->hInstance = (HINSTANCE)newval;
-                retval = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
+                retval = TRUNCCAST(ULONG_PTR, wine_server_get_ptr( reply->old_instance ));
                 break;
             case GWLP_WNDPROC:
                 break;
@@ -2847,6 +2876,33 @@ LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongW(
     LONG newval /* [in] new value of location */
 )
 {
+    if (GetVersion()&0x80000000 && offset == GWLP_WNDPROC)
+    {
+         /* CodeWeavers Only Hack... Needed for the Delegates tab 
+          * in Outlook XP running in win98 mode
+          */
+         char class[80];
+         GetClassNameA(hwnd, class, sizeof(class));
+         if (strcmp(class,"REListBox20W")==0)
+         {
+            char name[MAX_PATH], *p;
+            
+            GetModuleFileNameA(GetModuleHandleA(NULL),name,MAX_PATH);
+            p = strrchr(name, '\\');
+
+            if (p)
+                p++;
+            else
+                p = name;
+
+            if (!strcasecmp(p,"OUTLOOK.EXE"))
+            {
+                ERR("Outlook in WIN98 calling supposedly unimplemented function, triggering bandaid for class %s\n",debugstr_a(class));
+                SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+                return 0;
+            }
+         }
+    }
     switch (offset)
     {
 #ifdef _WIN64
@@ -4005,6 +4061,25 @@ BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINF
     if (!USER_Driver->pUpdateLayeredWindow( hwnd, info, &window_rect )) return FALSE;
 
     set_window_pos( hwnd, 0, flags, &window_rect, &client_rect, NULL );
+
+    /*
+     * CrossOver hack:
+     * Hide non-working, semi-transparent window in Quicken 2012.
+     * for bug 8982.
+     */
+    if(1) {
+        static const WCHAR QWinLightbox[] = {'Q','W','i','n','L','i','g','h','t','b','o','x',0};
+        WCHAR window_class[sizeof(QWinLightbox)/sizeof(WCHAR)];
+
+        if(GetClassNameW(hwnd, window_class, sizeof(QWinLightbox)/sizeof(WCHAR))
+                && !memcmp(QWinLightbox, window_class, sizeof(QWinLightbox))) {
+            FIXME("Hide semi-transparent window that is created over application window.\n");
+            SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOSENDCHANGING);
+        }
+    }
+
+
     return TRUE;
 }
 

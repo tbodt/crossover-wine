@@ -31,6 +31,8 @@
 #define __need_wchar_t
 #include <stddef.h>
 
+#include "wine/winheader_enter.h"
+
 /* 7.18.1.1  Exact-width integer types */
 typedef signed char int8_t;
 typedef unsigned char   uint8_t;
@@ -207,5 +209,7 @@ typedef unsigned long long   uintmax_t;
 #define UINTMAX_C(val) val##ULL
 
 #endif  /* !defined ( __cplusplus) || defined __STDC_CONSTANT_MACROS */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* _STDINT_H */

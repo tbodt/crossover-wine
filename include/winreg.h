@@ -21,6 +21,8 @@
 #ifndef __WINE_WINREG_H
 #define __WINE_WINREG_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -203,5 +205,7 @@ WINADVAPI LSTATUS   WINAPI RegUnLoadKeyW(HKEY,LPCWSTR);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINREG_H */

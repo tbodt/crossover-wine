@@ -8,7 +8,10 @@
 #ifndef __WINE_STRING_H
 #define __WINE_STRING_H
 
+#include "wine/winheader_enter.h"
+
 #include <corecrt.h>
+#include <wine/asm.h>
 
 #ifndef _NLSCMP_DEFINED
 #define _NLSCMPERROR               ((unsigned int)0x7fffffff)
@@ -32,6 +35,9 @@ extern "C" {
 void*   __cdecl memchr(const void*,int,size_t);
 int     __cdecl memcmp(const void*,const void*,size_t);
 void*   __cdecl memcpy(void*,const void*,size_t);
+#ifdef __i386_on_x86_64__
+void* HOSTPTR __cdecl memcpy(void* HOSTPTR,const void* HOSTPTR,size_t) __attribute__((overloadable)) asm(__ASM_NAME("wine_memcpy_HOSTPTR"));
+#endif
 errno_t __cdecl memcpy_s(void*,size_t,const void*,size_t);
 void*   __cdecl memset(void*,int,size_t);
 void*   __cdecl _memccpy(void*,const void*,int,unsigned int);
@@ -74,6 +80,9 @@ errno_t __cdecl strcpy_s(char*,size_t,const char*);
 size_t  __cdecl strcspn(const char*,const char*);
 char*   __cdecl strerror(int);
 size_t  __cdecl strlen(const char*);
+#ifdef __i386_on_x86_64__
+size_t  __cdecl strlen(const char* HOSTPTR) __attribute__((overloadable)) asm(__ASM_NAME("wine_strlen_HOSTPTR"));
+#endif
 char*   __cdecl strncat(char*,const char*,size_t);
 errno_t __cdecl strncat_s(char*,size_t,const char*,size_t);
 int     __cdecl strncmp(const char*,const char*,size_t);
@@ -158,5 +167,7 @@ static inline wchar_t* wcsnset(wchar_t* str, wchar_t c, size_t n) { return _wcsn
 static inline wchar_t* wcsrev(wchar_t* str) { return _wcsrev(str); }
 static inline wchar_t* wcsset(wchar_t* str, wchar_t c) { return _wcsset(str, c); }
 static inline wchar_t* wcsupr(wchar_t* str) { return _wcsupr(str); }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STRING_H */

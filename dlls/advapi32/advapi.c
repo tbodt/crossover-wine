@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -84,10 +85,18 @@ GetUserNameA( LPSTR lpszName, LPDWORD lpSize )
 BOOL WINAPI
 GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
 {
-    const char *name = wine_get_user_name();
-    DWORD i, len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
+    /* CrossOver Hack 12735: Use a consistent username */
+    const char * HOSTPTR report_real_username = getenv( "CX_REPORT_REAL_USERNAME" );
+    const char * HOSTPTR name;
+    DWORD i, len;
     LPWSTR backslash;
 
+    if (!report_real_username)
+        name = "crossover";
+    else
+        name = wine_get_user_name();
+
+    len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
     if (len > *lpSize)
     {
         SetLastError( ERROR_INSUFFICIENT_BUFFER );

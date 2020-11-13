@@ -46,7 +46,7 @@ static void wined3d_query_create_buffer_object(struct wined3d_context_gl *contex
     GL_EXTCALL(glGenBuffers(1, &buffer_object));
     GL_EXTCALL(glBindBuffer(GL_QUERY_BUFFER, buffer_object));
     GL_EXTCALL(glBufferStorage(GL_QUERY_BUFFER, sizeof(query->map_ptr[0]) * 2, NULL, map_flags));
-    query->map_ptr = GL_EXTCALL(glMapBufferRange(GL_QUERY_BUFFER, 0, sizeof(query->map_ptr[0]) * 2, map_flags));
+    query->map_ptr = ADDRSPACECAST(void*, GL_EXTCALL(glMapBufferRange(GL_QUERY_BUFFER, 0, sizeof(query->map_ptr[0]) * 2, map_flags)));
     GL_EXTCALL(glBindBuffer(GL_QUERY_BUFFER, 0));
     checkGLcall("query buffer object creation");
 

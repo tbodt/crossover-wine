@@ -18,6 +18,8 @@
 
 #include "objbase.h"
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -2131,3 +2133,5 @@ HRESULT WINAPI DebugCreate(REFIID riid, void **out);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"

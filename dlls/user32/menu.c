@@ -44,6 +44,11 @@
 
 #include <stdarg.h>
 #include <string.h>
+#include <errno.h>
+#include <stdio.h>
+#include <poll.h>
+#include <sys/un.h>
+#include <sys/socket.h>
 
 #define OEMRESOURCE
 
@@ -1067,9 +1072,12 @@ static void MENU_CalcItemSize( HDC hdc, MENUITEM *lpitem, HWND hwndOwner,
          */
         lpitem->rect.right += mis.itemWidth + 2 * menucharsize.cx;
         if (menuBar) {
-            /* under at least win95 you seem to be given a standard
-               height for the menu and the height value is ignored */
-            lpitem->rect.bottom += GetSystemMetrics(SM_CYMENUSIZE);
+            if (!getenv("CX_MENU_SOCKET"))
+            {
+                /* under at least win95 you seem to be given a standard
+                   height for the menu and the height value is ignored */
+                lpitem->rect.bottom += GetSystemMetrics(SM_CYMENUSIZE);
+            }
         } else
             lpitem->rect.bottom += mis.itemHeight;
 
@@ -1163,7 +1171,14 @@ static void MENU_CalcItemSize( HDC hdc, MENUITEM *lpitem, HWND hwndOwner,
         }
 	if (hfontOld) SelectObject (hdc, hfontOld);
     } else if( menuBar) {
-        itemheight = max( itemheight, GetSystemMetrics(SM_CYMENU)-1);
+        if (getenv("CX_MENU_SOCKET"))
+        {
+            itemheight = 0;
+        }
+        else
+        {
+            itemheight = max( itemheight, GetSystemMetrics(SM_CYMENU)-1);
+        }
     }
     lpitem->rect.bottom += itemheight;
     TRACE("%s\n", wine_dbgstr_rect( &lpitem->rect));
@@ -1329,6 +1344,7 @@ static void MENU_MenuBarCalcSize( HDC hdc, LPRECT lprect,
     lppop->Width = lppop->items_rect.right - lppop->items_rect.left;
     lppop->Height = lppop->items_rect.bottom - lppop->items_rect.top;
     lprect->bottom = lppop->items_rect.bottom;
+    if (getenv("CX_MENU_SOCKET")) lppop->Height = 0;
 
     /* Flush right all items between the MF_RIGHTJUSTIFY and */
     /* the last item (if several lines, only move the last line) */
@@ -1842,6 +1858,484 @@ static void MENU_DrawPopupMenu( HWND hwnd, HDC hdc, HMENU hmenu )
     }
 }
 
+
+#ifdef __APPLE__
+/***********************************************************************
+ *           MENU_get_menu_socket
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  On OSX, crossover.app can put a socket handle in
+ *   the CX_MENU_SOCKET environemtn variable.  If that
+ *   value is set then we will make an XML structure out
+ *   of the menu bar and pass it upstream so that the mac
+ *   application can display a proper mac-style menubar.
+ *
+ */
+static int MENU_get_menu_socket(void)
+{
+    char * HOSTPTR socketname;
+
+    if ((socketname = getenv("CX_MENU_SOCKET")))
+    {
+        struct sockaddr_un sa;
+        int sock = socket(AF_UNIX,SOCK_STREAM,0);
+        TRACE("Found socket %s.\n",socketname);
+
+        sa.sun_family=AF_UNIX;
+        if (strlen(socketname) > (sizeof(sa.sun_path)-1))
+        {
+            TRACE("Socket name %s is too long for us to use!\n", socketname);
+            return -1;
+        }
+
+        lstrcpynA(sa.sun_path,socketname,sizeof(sa.sun_path));
+
+        if (!connect(sock, (struct sockaddr *) &sa, sizeof(sa)))
+        {
+            /* Make the socket nonblocking.  That prevents us from locking up
+               if the Mac App stops listening. */
+            int flags = fcntl(sock, F_GETFL);
+            if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1)
+            {
+                TRACE("Failed to set socket to O_NONBLOCK.\n");
+            }
+
+            return sock;
+        }
+        else
+        {
+            WINE_WARN("Failed to connect to menu socket %s.  errno: %d\n",socketname,errno);
+            return -1;
+        }
+    }
+
+    return -1;
+}
+
+/***********************************************************************
+ *           to_utf8
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  This function and the next one are used to sanitize internal menu
+ *   titles so they can be embedded in XML as utf8.
+ *
+ */
+static LPSTR to_utf8(LPCWSTR strW)
+{
+    LPSTR str;
+    int len;
+
+    len = WideCharToMultiByte(CP_UTF8, 0, strW, -1, NULL, 0, NULL, NULL);
+    str = HeapAlloc(GetProcessHeap(), 0, len);
+    WideCharToMultiByte(CP_UTF8, 0, strW, -1, str, len, NULL, NULL);
+    return str;
+}
+
+/***********************************************************************
+ *           sanitize_for_xml
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ */
+static char* sanitize_for_xml(const WCHAR* srcW)
+{
+    const char* s;
+    char *src, *dst, *d;
+    DWORD len;
+
+    src=to_utf8(srcW);
+
+    /* Start with 1 rather than 0 to make room for null-termination */
+    len=1;
+    for (s=src; *s; s++)
+    {
+        switch (*s)
+        {
+        case '<':
+        case '>':
+            len+=4;
+            break;
+        case '\'':
+            len+=6;
+            break;
+        case '\"':
+            len+=6;
+            break;
+        case '&':
+            len+=5;
+            break;
+        default:
+            if ((unsigned char)*s <= 0x1f)
+                len+=3;
+            else
+                len+=1;
+        }
+    }
+
+    dst=d=HeapAlloc(GetProcessHeap(), 0, len);
+    for (s=src; *s; s++)
+    {
+        switch (*s)
+        {
+        case '<':
+            sprintf(d, "&lt;");
+            d+=4;
+            break;
+        case '>':
+            sprintf(d, "&gt;");
+            d+=4;
+            break;
+        case '\'':
+            sprintf(d, "&apos;");
+            d+=6;
+            break;
+        case '&':
+            sprintf(d, "&amp;");
+            d+=5;
+            break;
+        case '\"':
+            sprintf(d, "&quot;");
+            d+=6;
+            break;
+        default:
+            if ((unsigned char)*s <= 0x1f)
+            {
+                sprintf(d, "^%02X", (unsigned char) *s);
+                d+=3;
+            }
+            else
+            {
+                *d=*s;
+                d++;
+            }
+        }
+    }
+    *d='\0';
+
+    HeapFree(GetProcessHeap(), 0, src);
+    return dst;
+}
+
+
+static BOOL MENU_write_data_to_pipe(int sock, const char *data, int len)
+{
+    int written = 0;
+    short revents = 0;
+
+    while (written < len && !(revents & (POLLERR | POLLHUP)))
+    {
+        struct pollfd pollstruct;
+        int ready;
+
+        pollstruct.fd = sock;
+        pollstruct.events = POLLOUT;
+        pollstruct.revents = revents;
+
+        ready = poll(&pollstruct, 1, 1000);
+        if (ready && (ready != -1))
+        {
+            int thisChunkSize;
+            thisChunkSize = write(sock,data+written,len-written);
+            if (thisChunkSize == -1)
+            {
+                TRACE("Failed to write menu info.  errno: %d\n", errno);
+                break;
+            }
+            written += thisChunkSize;
+        }
+        else
+        {
+            /*  Timed out.  If the Mac app isn't listening, we
+                can just error out... there will be plenty more
+                menus where this one came from.  */
+            return FALSE;
+        }
+    }
+
+    if (written < len)
+    {
+        WINE_WARN("Failed to write to menu socket.  errno: %d\n",errno);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           MENU_put_escaped_string_on_pipe
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  Sanitize a string and then write it to the CX_MENU_SOCKET.
+ *
+ */
+static BOOL MENU_put_escaped_string_on_pipe(int sock,  const WCHAR *string)
+{
+    BOOL rval;
+    if (sock)
+    {
+        LPSTR escapedstring = sanitize_for_xml(string);
+        int size = strlen(escapedstring);
+        rval = MENU_write_data_to_pipe(sock, escapedstring, size);
+        HeapFree(GetProcessHeap(), 0, escapedstring);
+    }
+    else
+    {
+        rval = FALSE;
+        TRACE("no socket.\n");
+    }
+
+    return rval;
+}
+
+/***********************************************************************
+ *           MENU_put_string_on_pipe
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  Convert a string to utf8 and Write it to the CX_MENU_SOCKET.
+ *
+ */
+static BOOL MENU_put_string_on_pipe(int sock, const WCHAR *string)
+{
+    BOOL rval;
+    if (sock)
+    {
+        LPSTR utf8copy = to_utf8(string);
+        int size = strlen(utf8copy);
+        rval = MENU_write_data_to_pipe(sock, utf8copy, size);
+        HeapFree(GetProcessHeap(), 0, utf8copy);
+    }
+    else
+    {
+        rval = FALSE;
+        TRACE("no socket.\n");
+    }
+
+    return rval;
+}
+
+static BOOL MENU_put_astring_on_pipe(int sock, const char *string)
+{
+    BOOL rval;
+
+    if (sock)
+    {
+        int size = strlen(string);
+        rval = MENU_write_data_to_pipe(sock, string, size);
+    }
+    else
+    {
+        rval = FALSE;
+        TRACE("no socket.\n");
+    }
+
+    return rval;
+}
+
+
+/* We'll be composing our own XML structures using these tags. */
+static const WCHAR mainmenutitle[] =  {'m','a','i','n','m','e','n','u','\0'};
+
+static const WCHAR menuitemtag[] =  {'<','m','e','n','u','i','t','e','m','>','\0'};
+static const WCHAR menuitemendtag[] = {'<','/','m','e','n','u','i','t','e','m','>','\n','\0'};
+
+static const WCHAR menutag[] =  {'<','m','e','n','u','>','\0'};
+static const WCHAR menuendtag[] = {'<','/','m','e','n','u','>','\n','\0'};
+static const WCHAR titletag[] =  {'<','t','i','t','l','e','>','\0'};
+static const WCHAR titleendtag[] =  {'<','/','t','i','t','l','e','>','\0'};
+static const WCHAR statetag[] =  {'<','s','t','a','t','e','>','\0'};
+static const WCHAR stateendtag[] =  {'<','/','s','t','a','t','e','>','\0'};
+static const WCHAR hwndtag[] =  {'<','h','w','n','d','>','\0'};
+static const WCHAR hwndendtag[] =  {'<','/','h','w','n','d','>','\0'};
+static const WCHAR menuidtag[] =  {'<','m','e','n','u','i','d','>','\0'};
+static const WCHAR menuidendtag[] =  {'<','/','m','e','n','u','i','d','>','\0'};
+static const WCHAR empty[] = {'\0'};
+
+static BOOL MENU_put_menu_on_pipe(int sock,  HMENU hMenu, const WCHAR *title, HWND hwnd);
+
+/***********************************************************************
+ *           MENU_put_item_on_pipe
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  Compose an XML element for a single menu item, and
+ *   write it to the CX_MENU_SOCKET.
+ *
+ *  If the menu item has a submenu, call MENY_put_menu_on_pipe
+ *   recursively.
+ *
+ */
+static BOOL MENU_put_item_on_pipe(int sock,  MENUITEM *item)
+{
+    char idstring[16];
+    sprintf(idstring, "%d", (UINT) item->wID);
+    if (item->fType & MF_SEPARATOR)
+    {
+        if (!MENU_put_string_on_pipe(sock, menuitemtag))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, menuitemendtag))
+            return FALSE;
+    }
+    else if (item->hSubMenu)
+    {
+        if(!MENU_put_menu_on_pipe(sock, item->hSubMenu, item->text, (HWND) -1))
+            return FALSE;
+    }
+    else
+    {
+        char statestring[16];
+        sprintf(statestring, "%d", item->fState);
+        if (!MENU_put_string_on_pipe(sock, menuitemtag))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, menuidtag))
+            return FALSE;
+        if (!MENU_put_astring_on_pipe(sock, idstring))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, menuidendtag))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, titletag))
+            return FALSE;
+        if (!MENU_put_escaped_string_on_pipe(sock, item->text))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, titleendtag))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, statetag))
+            return FALSE;
+        if (!MENU_put_astring_on_pipe(sock, statestring))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, stateendtag))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, menuitemendtag))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           MENU_put_menu_on_pipe
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  Compose an XML element for a complete menu.  This
+ *   may get called recursively via MENU_put_menu_item_on_pipe.
+ *
+ */
+static BOOL MENU_put_menu_on_pipe(int sock,  HMENU hMenu, const WCHAR *title, HWND hwnd)
+{
+    int i;
+    POPUPMENU *menu = MENU_GetMenu(hMenu);
+    char idstring[16];
+
+    if (!menu)
+    {
+        return TRUE;
+    }
+    sprintf(idstring, "%d", (UINT) hMenu);
+
+    if (!MENU_put_string_on_pipe(sock, menutag))
+        return FALSE;
+    if (!MENU_put_string_on_pipe(sock, menuidtag))
+        return FALSE;
+    if (!MENU_put_astring_on_pipe(sock, idstring))
+        return FALSE;
+    if (!MENU_put_string_on_pipe(sock, menuidendtag))
+        return FALSE;
+    if (!MENU_put_string_on_pipe(sock, titletag))
+        return FALSE;
+    if (!MENU_put_escaped_string_on_pipe(sock, title))
+        return FALSE;
+    if (!MENU_put_string_on_pipe(sock, titleendtag))
+        return FALSE;
+    if (hwnd != (HWND) -1)
+    {
+        char hwndstring[16];
+        sprintf(hwndstring, "%d", (int) hwnd);
+        if (!MENU_put_string_on_pipe(sock, hwndtag))
+            return FALSE;
+        if (!MENU_put_astring_on_pipe(sock, hwndstring))
+            return FALSE;
+        if (!MENU_put_string_on_pipe(sock, hwndendtag))
+            return FALSE;
+    }
+
+    for (i = 0; i < menu->nItems; i++)
+    {
+        MENUITEM *item;
+        item = &menu->items[i];
+        if (item && item->text)
+        {
+            if (!MENU_put_item_on_pipe(sock, item))
+                return FALSE;
+        }
+        if (item->fType & MF_SEPARATOR)
+        {
+            if (!MENU_put_item_on_pipe(sock, item))
+                return FALSE;
+        }
+    }
+    if (!MENU_put_string_on_pipe(sock, menuendtag))
+        return FALSE;
+
+    return TRUE;
+}
+
+#endif /* __APPLE__ */
+
+
+/***********************************************************************
+ *           MENU_send_window_menubar_to_macapp
+ *
+ *  CrossOver HACKs for bug 6727.
+ *
+ *  If we are able to open the CX_MENU_SOCKET, then
+ *   write the menu bar for hwnd to the socket.
+ *
+ *  Returns TRUE on success, False if the socket cannot
+ *   be opened.
+ */
+BOOL MENU_send_window_menubar_to_macapp( HWND ahwnd )
+{
+#ifdef __APPLE__
+
+    int sock;
+    HWND hwnd = ahwnd;
+    HMENU hMenu = NULL;
+
+    while (!hMenu && hwnd)
+    {
+        hMenu = GetMenu(hwnd);
+        if (!hMenu)
+            hwnd = GetParent(hwnd);
+    }
+
+    if (!hMenu)
+    {
+        return FALSE;
+    }
+
+    sock = MENU_get_menu_socket();
+    if (sock != -1)
+    {
+        if (!MENU_put_menu_on_pipe(sock, hMenu, mainmenutitle, hwnd))
+        {
+            close(sock);
+            return FALSE;
+            TRACE("Failed due to timeout.\n");
+        }
+        close(sock);
+        return TRUE;
+    }
+
+#endif /* __APPLE__ */
+
+    return FALSE;
+}
+
+
 /***********************************************************************
  *           MENU_DrawMenuBar
  *
@@ -1852,6 +2346,12 @@ UINT MENU_DrawMenuBar( HDC hDC, LPRECT lprect, HWND hwnd )
 {
     LPPOPUPMENU lppop;
     HMENU hMenu = GetMenu(hwnd);
+
+    if (getenv("CX_MENU_SOCKET"))
+    {
+        MENU_send_window_menubar_to_macapp( GetForegroundWindow() );
+        return 0;
+    }
 
     lppop = MENU_GetMenu( hMenu );
     if (lppop == NULL || lprect == NULL)
@@ -3717,6 +4217,7 @@ DWORD WINAPI CheckMenuItem( HMENU hMenu, UINT id, UINT flags )
     if (flags & MF_CHECKED) item->fState |= MF_CHECKED;
     else item->fState &= ~MF_CHECKED;
     release_menu_ptr(menu);
+    MENU_send_window_menubar_to_macapp( GetForegroundWindow() );
     return ret;
 }
 
@@ -4109,6 +4610,7 @@ BOOL WINAPI RemoveMenu( HMENU hMenu, UINT id, UINT flags )
     }
     release_menu_ptr(menu);
 
+    MENU_send_window_menubar_to_macapp( GetForegroundWindow() );
     return TRUE;
 }
 

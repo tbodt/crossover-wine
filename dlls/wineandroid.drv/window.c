@@ -28,6 +28,7 @@
 
 #include <assert.h>
 #include <fcntl.h>
+#include <math.h>
 #include <poll.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -235,7 +236,6 @@ void desktop_changed( JNIEnv *env, jobject obj, jint width, jint height )
     data.type = DESKTOP_CHANGED;
     data.desktop.width = width;
     data.desktop.height = height;
-    p__android_log_print( ANDROID_LOG_INFO, "wine", "desktop_changed: %ux%u", width, height );
     send_event( &data );
 }
 
@@ -252,7 +252,6 @@ void config_changed( JNIEnv *env, jobject obj, jint dpi )
     memset( &data, 0, sizeof(data) );
     data.type = CONFIG_CHANGED;
     data.cfg.dpi = dpi;
-    p__android_log_print( ANDROID_LOG_INFO, "wine", "config_changed: %u dpi", dpi );
     send_event( &data );
 }
 
@@ -279,8 +278,6 @@ void surface_changed( JNIEnv *env, jobject obj, jint win, jobject surface, jbool
         data.surface.window = win;
         data.surface.width = width;
         data.surface.height = height;
-        p__android_log_print( ANDROID_LOG_INFO, "wine", "surface_changed: %p %s %ux%u",
-                              data.surface.hwnd, client ? "client" : "whole", width, height );
     }
     data.type = SURFACE_CHANGED;
     send_event( &data );
@@ -334,7 +331,7 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_TERTIARY)
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN;
-        if (!(state & ~prev_state)) /* touch event */
+        if (!state) /* touch event */
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         break;
     case AMOTION_EVENT_ACTION_UP:
@@ -350,8 +347,11 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
         break;
     case AMOTION_EVENT_ACTION_SCROLL:
-        data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_WHEEL;
-        data.motion.input.u.mi.mouseData = vscroll < 0 ? -WHEEL_DELTA : WHEEL_DELTA;
+        if ((action & 0x10000) == 0x10000)
+            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_HWHEEL;
+        else
+            data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_WHEEL;
+        data.motion.input.u.mi.mouseData = vscroll;
         break;
     case AMOTION_EVENT_ACTION_MOVE:
     case AMOTION_EVENT_ACTION_HOVER_MOVE:
@@ -363,6 +363,66 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
     return JNI_TRUE;
 }
 
+void set_focus( JNIEnv *env, jobject obj, jint win )
+{
+    union event_data data;
+
+    data.type = SET_FOCUS;
+    data.focus.hwnd = LongToHandle( win );
+    send_event( &data );
+}
+
+void send_syscommand( JNIEnv *env, jobject obj, jint win, jint param )
+{
+    union event_data data;
+
+    data.type = SEND_SYSCOMMAND;
+    data.syscommand.hwnd = LongToHandle( win );
+    data.syscommand.wp = param;
+    send_event( &data );
+}
+
+void clipdata_update( JNIEnv *env, jobject obj, jint flags, jobjectArray mimetypes )
+{
+    union event_data data;
+    int i;
+
+    data.type = CLIPDATA_UPDATE;
+    data.clipdata.flags = flags;
+
+    if (mimetypes)
+    {
+        int count = (*env)->GetArrayLength( env, mimetypes );
+
+        data.clipdata.mimetypes = malloc( sizeof(LPWSTR*) * (count + 1) );
+        for (i = 0; i < count; i++)
+        {
+            jobject s = (*env)->GetObjectArrayElement( env, mimetypes, i );
+            const jchar *mimetype_str = (*env)->GetStringChars( env, s, NULL );
+            jsize len = (*env)->GetStringLength( env, s );
+            data.clipdata.mimetypes[i] = malloc( sizeof(WCHAR) * (len + 1) );
+            lstrcpynW( data.clipdata.mimetypes[i], (WCHAR*)mimetype_str, len + 1 );
+            (*env)->ReleaseStringChars( env, s, mimetype_str );
+        }
+        data.clipdata.mimetypes[i] = 0;
+    }
+    else
+        data.clipdata.mimetypes = NULL;
+
+    send_event( &data );
+}
+
+void send_window_close( JNIEnv *env, jobject obj, jint win )
+{
+    union event_data data;
+
+    data.type = SEND_WINDOW_CLOSE;
+    data.syscommand.hwnd = LongToHandle( win );
+    send_event( &data );
+}
+
+
+extern void CDECL __wine_esync_set_queue_fd( int fd );
 
 /***********************************************************************
  *           init_event_queue
@@ -377,6 +437,7 @@ static void init_event_queue(void)
         ERR( "could not create data\n" );
         ExitProcess(1);
     }
+    __wine_esync_set_queue_fd( event_pipe[0] );
     if (wine_server_fd_to_handle( event_pipe[0], GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {
         ERR( "Can't allocate handle for event fd\n" );
@@ -538,6 +599,74 @@ static int process_events( DWORD mask )
             __wine_send_input( 0, &event->data.kbd.input );
             break;
 
+        case SET_FOCUS:
+            TRACE("SET_FOCUS %p\n", event->data.focus.hwnd);
+            SendNotifyMessageW( event->data.focus.hwnd, WM_ANDROID_SET_FOCUS, 0, 0 );
+            break;
+
+        case SEND_SYSCOMMAND:
+            TRACE( "SEND_SYSCOMMAND %p %08lx\n", event->data.syscommand.hwnd, event->data.syscommand.wp );
+            SendNotifyMessageW( event->data.syscommand.hwnd, WM_SYSCOMMAND, event->data.syscommand.wp, 0 );
+            break;
+
+        case CLIPDATA_UPDATE:
+            TRACE("CLIPDATA_UPDATE flags %x mimetypes %p\n", event->data.clipdata.flags, event->data.clipdata.mimetypes);
+            handle_clipdata_update( event->data.clipdata.flags, event->data.clipdata.mimetypes );
+            break;
+
+        case IME_TEXT:
+            ERR( "IME_TEXT target %u, length %u\n", event->data.ime_text.target , event->data.ime_text.length );
+            handle_IME_TEXT( event->data.ime_text.target, event->data.ime_text.length);
+            break;
+
+        case IME_FINISH:
+            TRACE( "IME_FINISH target %u, length %u\n", event->data.ime_finish.target, event->data.ime_text.length );
+            handle_IME_FINISH( event->data.ime_finish.target, event->data.ime_finish.length );
+            break;
+
+        case IME_CANCEL:
+            TRACE( "IME_CANCEL\n" );
+            handle_IME_CANCEL();
+            break;
+
+        case IME_START:
+            TRACE( "IME_START\n" );
+            handle_IME_START();
+            break;
+
+        case RUN_CMDLINE:
+            handle_run_cmdline( event->data.runcmd.cmdline, event->data.runcmd.env );
+            free( event->data.runcmd.cmdline );
+            if (event->data.runcmd.env)
+            {
+                LPWSTR *strs = event->data.runcmd.env;
+                while (*strs) free( *strs++ );
+                free( event->data.runcmd.env );
+            }
+            break;
+        case RUN_CMDARRAY:
+            handle_run_cmdarray( event->data.runcmdarr.cmdarray, event->data.runcmdarr.env );
+            if (event->data.runcmdarr.cmdarray)
+            {
+                LPWSTR *strs = event->data.runcmdarr.cmdarray;
+                while (*strs) free( *strs++ );
+                free( event->data.runcmdarr.cmdarray );
+            }
+            if (event->data.runcmdarr.env)
+            {
+                LPWSTR *strs = event->data.runcmdarr.env;
+                while (*strs) free( *strs++ );
+                free( event->data.runcmdarr.env );
+            }
+            break;
+        case CLEAR_META:
+            TRACE( "CLEAR_META" );
+            handle_clear_meta_key_states( event->data.clearmeta.states );
+            break;
+        case SEND_WINDOW_CLOSE:
+            TRACE( "SEND_WINDOW_CLOSE %p\n", event->data.syscommand.hwnd );
+            SendMessageW( event->data.syscommand.hwnd, WM_CLOSE, 0, 0 );
+            break;
         default:
             FIXME( "got event %u\n", event->data.type );
         }
@@ -861,27 +990,18 @@ static void set_color_key( struct android_window_surface *surface, COLORREF key 
 static void set_surface_region( struct window_surface *window_surface, HRGN win_region )
 {
     struct android_window_surface *surface = get_android_surface( window_surface );
-    struct android_win_data *win_data;
     HRGN region = win_region;
     RGNDATA *data = NULL;
     DWORD size;
-    int offset_x, offset_y;
 
     if (window_surface->funcs != &android_surface_funcs) return;  /* we may get the null surface */
 
-    if (!(win_data = get_win_data( surface->hwnd ))) return;
-    offset_x = win_data->window_rect.left - win_data->whole_rect.left;
-    offset_y = win_data->window_rect.top - win_data->whole_rect.top;
-    release_win_data( win_data );
-
     if (win_region == (HRGN)1)  /* hack: win_region == 1 means retrieve region from server */
     {
-        region = CreateRectRgn( 0, 0, win_data->window_rect.right - win_data->window_rect.left,
-                                win_data->window_rect.bottom - win_data->window_rect.top );
+        region = CreateRectRgnIndirect( &surface->header.rect );
         if (GetWindowRgn( surface->hwnd, region ) == ERROR && !surface->region) goto done;
     }
 
-    OffsetRgn( region, offset_x, offset_y );
     if (surface->region) CombineRgn( region, region, surface->region, RGN_AND );
 
     if (!(size = GetRegionData( region, 0, NULL ))) goto done;
@@ -1076,6 +1196,31 @@ failed:
 }
 
 
+/***********************************************************************
+ *              fetch_window_icon
+ */
+static void fetch_window_icon( HWND hwnd, HICON icon )
+{
+    ICONINFO ii;
+    unsigned int width = 0, height = 0, *bits = NULL;
+
+    if (!icon) icon = (HICON)SendMessageW( hwnd, WM_GETICON, ICON_BIG, 0 );
+    if (!icon) icon = (HICON)GetClassLongPtrW( hwnd, GCLP_HICON );
+
+    if (GetIconInfo( icon, &ii ))
+    {
+        HDC hdc = CreateCompatibleDC( 0 );
+        bits = get_bitmap_argb( hdc, ii.hbmColor, ii.hbmMask, &width, &height );
+        DeleteDC( hdc );
+        DeleteObject( ii.hbmColor );
+        DeleteObject( ii.hbmMask );
+    }
+
+    ioctl_set_window_icon( hwnd, width, height, bits );
+    HeapFree( GetProcessHeap(), 0, bits );
+}
+
+
 enum android_system_cursors
 {
     TYPE_ARROW = 1000,
@@ -1197,6 +1342,9 @@ static LRESULT CALLBACK desktop_wndproc_wrapper( HWND hwnd, UINT msg, WPARAM wp,
     case WM_PARENTNOTIFY:
         if (LOWORD(wp) == WM_DESTROY) destroy_ioctl_window( (HWND)lp, FALSE );
         break;
+    case WM_CLOSE:
+        ioctl_close_desktop();
+        break;
     }
     return desktop_orig_wndproc( hwnd, msg, wp, lp );
 }
@@ -1218,6 +1366,19 @@ DWORD CDECL ANDROID_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *hand
                                      timeout, flags & MWMO_ALERTABLE );
 }
 
+/*****************************************************************
+ *		SetFocus
+ */
+void CDECL ANDROID_SetFocus( HWND hwnd )
+{
+    IME_UpdateAssociation(hwnd);
+
+    hwnd = GetAncestor( hwnd, GA_ROOT );
+    ioctl_set_window_focus( hwnd );
+    SetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOSIZE );
+}
+
+
 /**********************************************************************
  *           ANDROID_CreateWindow
  */
@@ -1233,6 +1394,7 @@ BOOL CDECL ANDROID_CreateWindow( HWND hwnd )
         start_android_device();
         if (!(data = alloc_win_data( hwnd ))) return FALSE;
         release_win_data( data );
+        init_clipboard();
     }
     return TRUE;
 }
@@ -1270,6 +1432,13 @@ static struct android_win_data *create_win_data( HWND hwnd, const RECT *window_r
     if (!(data = alloc_win_data( hwnd ))) return NULL;
 
     data->parent = (parent == GetDesktopWindow()) ? 0 : parent;
+    if (!data->parent)
+    {
+        WCHAR text[1024];
+        if (InternalGetWindowText( hwnd, text, sizeof(text)/sizeof(WCHAR) ))
+            ioctl_set_window_text( hwnd, text );
+    }
+
     data->whole_rect = data->window_rect = *window_rect;
     data->client_rect = *client_rect;
     return data;
@@ -1352,7 +1521,7 @@ void CDECL ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flag
 {
     struct android_win_data *data;
     DWORD new_style = GetWindowLongW( hwnd, GWL_STYLE );
-    HWND owner = 0;
+    BOOL is_child;
 
     if (!(data = get_win_data( hwnd ))) return;
 
@@ -1366,17 +1535,24 @@ void CDECL ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flag
         if (data->surface) window_surface_release( data->surface );
         data->surface = surface;
     }
-    if (!data->parent) owner = GetWindow( hwnd, GW_OWNER );
+    is_child = (data->parent != 0);
+
     release_win_data( data );
 
-    if (!(swp_flags & SWP_NOZORDER)) insert_after = GetWindow( hwnd, GW_HWNDPREV );
-
-    TRACE( "win %p window %s client %s style %08x owner %p after %p flags %08x\n", hwnd,
+    TRACE( "win %p window %s client %s style %08x after %p flags %08x\n", hwnd,
            wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
-           new_style, owner, insert_after, swp_flags );
+           new_style, insert_after, swp_flags );
 
-    ioctl_window_pos_changed( hwnd, window_rect, client_rect, visible_rect,
-                              new_style, swp_flags, insert_after, owner );
+    if (is_child)
+    {
+        if (!(swp_flags & SWP_NOZORDER)) insert_after = GetWindow( hwnd, GW_HWNDPREV );
+        ioctl_window_pos_changed( hwnd, window_rect, client_rect, visible_rect, new_style, swp_flags, insert_after, 0 );
+        return;
+    }
+
+    ioctl_window_pos_changed( hwnd, window_rect, client_rect, visible_rect, new_style, swp_flags,
+                              insert_after, GetWindow( hwnd, GW_OWNER ));
+    if (swp_flags & SWP_SHOWWINDOW) fetch_window_icon( hwnd, 0 );
 }
 
 
@@ -1491,6 +1667,25 @@ void CDECL ANDROID_SetWindowStyle( HWND hwnd, INT offset, STYLESTRUCT *style )
         else if (data->surface) set_surface_layered( data->surface, 255, CLR_INVALID );
     }
     release_win_data( data );
+}
+
+
+/*****************************************************************
+ *		ANDROID_SetWindowIcon
+ */
+void CDECL ANDROID_SetWindowIcon( HWND hwnd, UINT type, HICON icon )
+{
+    if (type != ICON_BIG) return;  /* small icons not supported */
+    fetch_window_icon( hwnd, icon );
+}
+
+
+/*****************************************************************
+ *		ANDROID_SetWindowText
+ */
+void CDECL ANDROID_SetWindowText( HWND hwnd, WCHAR *text /* technically const */ )
+{
+    ioctl_set_window_text( hwnd, text );
 }
 
 
@@ -1615,6 +1810,76 @@ done:
     return ret;
 }
 
+static inline BOOL can_activate_window( HWND hwnd )
+{
+    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
+    RECT rect;
+
+    if (!(style & WS_VISIBLE)) return FALSE;
+    if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
+    if (style & WS_MINIMIZE) return FALSE;
+    if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_NOACTIVATE) return FALSE;
+    if (hwnd == GetDesktopWindow()) return FALSE;
+    if (GetWindowRect( hwnd, &rect ) && IsRectEmpty( &rect )) return FALSE;
+    return !(style & WS_DISABLED);
+}
+
+static BOOL try_activate_window( HWND hwnd )
+{
+    if (can_activate_window( hwnd ))
+    {
+        LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
+                                   (WPARAM)GetAncestor( hwnd, GA_ROOT ),
+                                   MAKELONG(HTCAPTION, WM_LBUTTONDOWN) );
+
+        if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+        {
+            if (SetForegroundWindow( hwnd ))
+            {
+                SetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE );
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+
+static BOOL CALLBACK enum_activate_owned( HWND hwnd, LPARAM lparam )
+{
+    HWND owner = (HWND)lparam;
+
+    if (GetWindow( hwnd, GW_OWNER ) == owner)
+    {
+        if (try_activate_window( hwnd ))
+            return FALSE;
+
+        if (!EnumWindows( enum_activate_owned, (LPARAM)hwnd ))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+void handle_set_focus( HWND hwnd )
+{
+    DWORD style;
+
+    if (hwnd == GetDesktopWindow())
+    {
+        SendMessageW( GetForegroundWindow(), WM_CANCELMODE, 0, 0 );
+        SetForegroundWindow( hwnd );
+        return;
+    }
+
+    if (try_activate_window( hwnd )) return;
+
+    /* Try to activate a window owned by a disabled window. */
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    if (style & WS_DISABLED)
+        EnumWindows( enum_activate_owned, (LPARAM)hwnd );
+}
+
 
 /**********************************************************************
  *           ANDROID_WindowMessage
@@ -1643,6 +1908,11 @@ LRESULT CDECL ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
             release_win_data( data );
         }
         return 0;
+    case WM_ANDROID_IME_CONTROL:
+        return Ime_Control(hwnd, msg, wp, lp);
+    case WM_ANDROID_SET_FOCUS:
+        handle_set_focus( hwnd );
+        return 0;
     default:
         FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
         return 0;
@@ -1655,6 +1925,13 @@ LRESULT CDECL ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
  */
 BOOL CDECL ANDROID_create_desktop( UINT width, UINT height )
 {
+    static const WCHAR shellW[] = {'s','h','e','l','l',0};
+    WCHAR name[MAX_PATH];
+
+    if (!GetUserObjectInformationW( GetThreadDesktop( GetCurrentThreadId() ),
+                                    UOI_NAME, name, sizeof(name), NULL ))
+        name[0] = 0;
+
     desktop_orig_wndproc = (WNDPROC)SetWindowLongPtrW( GetDesktopWindow(), GWLP_WNDPROC,
                                                        (LONG_PTR)desktop_wndproc_wrapper );
 
@@ -1668,5 +1945,6 @@ BOOL CDECL ANDROID_create_desktop( UINT width, UINT height )
         }
         process_events( QS_ALLINPUT );
     }
-    return TRUE;
+    /* use desktop mode only for the "shell" desktop */
+    return !lstrcmpiW( name, shellW );
 }

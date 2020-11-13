@@ -1438,8 +1438,8 @@ void codeview_dump_linetab(const char* linetab, BOOL pascal_str, const char* pfx
 void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimage, DWORD strsize, const char* pfx)
 {
     unsigned    i;
-    const struct codeview_linetab2*     lt2;
-    const struct codeview_linetab2*     lt2_files = NULL;
+    const struct codeview_linetab2* lt2;
+    const struct codeview_linetab2* lt2_files = NULL;
     const struct codeview_lt2blk_lines* lines_blk;
     const struct codeview_linetab2_file*fd;
 

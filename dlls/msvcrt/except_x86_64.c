@@ -21,7 +21,7 @@
 #include "config.h"
 #include "wine/port.h"
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 
 #include <stdarg.h>
 

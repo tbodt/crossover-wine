@@ -19,6 +19,8 @@
 #ifndef __DINPUT_INCLUDED__
 #define __DINPUT_INCLUDED__
 
+#include "wine/winheader_enter.h"
+
 #define COM_NO_WINDOWS_H
 #include <objbase.h>
 
@@ -2552,5 +2554,7 @@ HRESULT WINAPI DirectInputCreateEx(HINSTANCE,DWORD,REFIID,LPVOID *,LPUNKNOWN);
 #ifdef __cplusplus
 };
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __DINPUT_INCLUDED__ */

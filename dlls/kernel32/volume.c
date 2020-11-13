@@ -71,7 +71,7 @@ enum fs_type
 /* get the path of a dos device symlink in the $WINEPREFIX/dosdevices directory */
 static char *get_dos_device_path( LPCWSTR name )
 {
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     char *buffer, *dev;
     int i;
 
@@ -816,9 +816,21 @@ fill_fs_info:  /* now fill in the information that depends on the file system ty
         if (flags) *flags = FILE_CASE_PRESERVED_NAMES;  /* FIXME */
         break;
     default:
-        if (fsname) lstrcpynW( fsname, ntfsW, fsname_len );
-        if (filename_len) *filename_len = 255;
-        if (flags) *flags = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS;
+        {
+            DWORD ret = GetEnvironmentVariableA("CX_HACK_FILESYSTEM_TYPE",NULL,0);
+            if (ret > 0)
+            {
+                static const WCHAR unixfsW[] = {'U','N','I','X','F','S',0};
+                if (fsname) lstrcpynW( fsname, unixfsW, fsname_len );
+                if (flags) *flags = FILE_CASE_PRESERVED_NAMES;
+            }
+            else
+            {
+                if (fsname) lstrcpynW( fsname, ntfsW, fsname_len );
+                if (flags) *flags = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS;
+            }
+            if (filename_len) *filename_len = 255;
+        }
         break;
     }
     ret = TRUE;
@@ -1465,6 +1477,21 @@ UINT WINAPI GetDriveTypeW(LPCWSTR root) /* [in] String describing drive */
     }
     else
     {
+        char type_hack[255];
+        DWORD e_ret = GetEnvironmentVariableA("CX_HACK_REMOTE_DRIVES", type_hack, 255);
+        if (e_ret > 0)
+        {
+            char drive;
+            if (root) drive = root[0];
+            else
+            {
+                WCHAR path[MAX_PATH];
+                GetCurrentDirectoryW( MAX_PATH, path );
+                drive = path[0];
+            }
+            if (strchr( type_hack, tolower(drive) )) return DRIVE_REMOTE;
+        }
+
         switch (info.DeviceType)
         {
         case FILE_DEVICE_CD_ROM_FILE_SYSTEM:  ret = DRIVE_CDROM; break;

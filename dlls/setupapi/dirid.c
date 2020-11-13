@@ -95,6 +95,7 @@ static const WCHAR *create_system_dirid( int dirid )
     case DIRID_WINDOWS:
         GetWindowsDirectoryW( buffer, MAX_PATH );
         break;
+    case 13: /* DIRID_SYSTEM32 ? - used by IE6 install */
     case DIRID_SYSTEM:
         GetSystemDirectoryW( buffer, MAX_PATH );
         break;

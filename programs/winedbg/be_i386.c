@@ -21,7 +21,7 @@
 #include "debugger.h"
 #include "wine/debug.h"
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -33,7 +33,7 @@ extern void             be_i386_disasm_one_insn(ADDRESS64* addr, int display);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 typedef struct DECLSPEC_ALIGN(16) _M128A {
     ULONGLONG Low;
     LONGLONG High;
@@ -59,6 +59,19 @@ typedef struct _XMM_SAVE_AREA32 {
 } XMM_SAVE_AREA32, *PXMM_SAVE_AREA32;
 #endif
 
+static inline void * wine_ldt_get_base( const LDT_ENTRY *ent )
+{
+    return (void *)(ent->BaseLow |
+                    (ULONG_PTR)ent->HighWord.Bits.BaseMid << 16 |
+                    (ULONG_PTR)ent->HighWord.Bits.BaseHi << 24);
+}
+static inline unsigned int wine_ldt_get_limit( const LDT_ENTRY *ent )
+{
+    unsigned int limit = ent->LimitLow | (ent->HighWord.Bits.LimitHi << 16);
+    if (ent->HighWord.Bits.Granularity) limit = (limit << 12) | 0xfff;
+    return limit;
+}
+
 static ADDRESS_MODE get_selector_type(HANDLE hThread, const WOW64_CONTEXT *ctx, WORD sel)
 {
     LDT_ENTRY	le;
@@ -67,7 +80,11 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const WOW64_CONTEXT *ctx, 
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
     if (dbg_curr_process->process_io->get_selector(hThread, sel, &le))
+    {
+        if (wine_ldt_get_base(&le) == 0 && wine_ldt_get_limit(&le) == 0xffffffff)
+            return AddrModeFlat;
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
+    }
     /* selector doesn't exist */
     return -1;
 }

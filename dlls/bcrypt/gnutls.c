@@ -64,6 +64,8 @@ typedef enum
 } gnutls_ecc_curve_t;
 #endif
 
+#include "wine/hostptraddrspace_enter.h"
+
 /* Not present in gnutls version < 3.0 */
 static int (*pgnutls_cipher_tag)(gnutls_cipher_hd_t, void *, size_t);
 static int (*pgnutls_cipher_add_auth)(gnutls_cipher_hd_t, const void *, size_t);
@@ -176,11 +178,27 @@ static void gnutls_log( int level, const char *msg )
     TRACE( "<%d> %s", level, msg );
 }
 
+#include "wine/hostptraddrspace_exit.h"
+
 BOOL gnutls_initialize(void)
 {
     int ret;
 
-    if (!(libgnutls_handle = wine_dlopen( SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0 )))
+if (1) { /* CROSSOVER HACK - bug 10151 */
+    const char *libgnutls_name_candidates[] = {SONAME_LIBGNUTLS,
+                                               "libgnutls.so.30",
+                                               "libgnutls.so.28",
+                                               "libgnutls-deb0.so.28",
+                                               "libgnutls.so.26",
+                                               NULL};
+    int i;
+    for (i=0; libgnutls_name_candidates[i] && !libgnutls_handle; i++)
+        libgnutls_handle = wine_dlopen(libgnutls_name_candidates[i], RTLD_NOW, NULL, 0);
+}
+else
+    libgnutls_handle = wine_dlopen( SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0 );
+
+    if (!libgnutls_handle)
     {
         ERR_(winediag)( "failed to load libgnutls, no support for encryption\n" );
         return FALSE;
@@ -602,7 +620,7 @@ static NTSTATUS export_gnutls_pubkey_rsa( gnutls_privkey_t gnutls_key, ULONG bit
 {
     BCRYPT_RSAKEY_BLOB *rsa_blob;
     gnutls_datum_t m, e;
-    UCHAR *dst, *src;
+    UCHAR *dst, * HOSTPTR src;
     int ret;
 
     if ((ret = pgnutls_privkey_export_rsa_raw( gnutls_key, &m, &e, NULL, NULL, NULL, NULL, NULL, NULL )))
@@ -656,7 +674,7 @@ static NTSTATUS export_gnutls_pubkey_ecc( gnutls_privkey_t gnutls_key, UCHAR **p
     gnutls_ecc_curve_t curve;
     gnutls_datum_t x, y;
     DWORD magic, size;
-    UCHAR *src, *dst;
+    UCHAR * HOSTPTR src, * HOSTPTR dst;
     int ret;
 
     if ((ret = pgnutls_privkey_export_ecc_raw( gnutls_key, &curve, &x, &y, NULL )))
@@ -778,7 +796,7 @@ NTSTATUS key_export_ecc( struct key *key, UCHAR *buf, ULONG len, ULONG *ret_len 
     gnutls_ecc_curve_t curve;
     gnutls_datum_t x, y, d;
     DWORD magic, size;
-    UCHAR *src, *dst;
+    UCHAR * HOSTPTR src, * HOSTPTR dst;
     int ret;
 
     if ((ret = pgnutls_privkey_export_ecc_raw( key->u.a.handle, &curve, &x, &y, &d )))

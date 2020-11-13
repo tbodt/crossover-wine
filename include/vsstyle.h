@@ -19,6 +19,8 @@
 #ifndef __VSSTYLE_H__
 #define __VSSTYLE_H__
 
+#include "wine/winheader_enter.h"
+
 
 #define TMTVS_RESERVEDLOW 100000
 #define TMTVS_RESERVEDHIGH 19999
@@ -1652,5 +1654,7 @@ enum CLOSEBUTTONSTATES {
     CBS_PUSHED = 3,
     CBS_DISABLED = 4,
 };
+
+#include "wine/winheader_exit.h"
 
 #endif /* __VSSTYLE_H__ */

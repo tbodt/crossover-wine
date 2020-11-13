@@ -3163,7 +3163,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_StrokeContainsPoint(ID2D1Path
             "transform %p, tolerance %.8e, contains %p stub!\n",
             iface, debug_d2d_point_2f(&point), stroke_width, stroke_style, transform, tolerance, contains);
 
-    return E_NOTIMPL;
+    return ID2D1PathGeometry_FillContainsPoint(iface, point, transform, tolerance, contains);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_FillContainsPoint(ID2D1PathGeometry *iface,
@@ -3607,7 +3607,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_StrokeContainsPoint(ID2D
     FIXME("iface %p, point %s, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, contains %p stub!\n",
             iface, debug_d2d_point_2f(&point), stroke_width, stroke_style, transform, tolerance, contains);
 
-    return E_NOTIMPL;
+    return ID2D1RectangleGeometry_FillContainsPoint(iface, point, transform, tolerance, contains);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_FillContainsPoint(ID2D1RectangleGeometry *iface,

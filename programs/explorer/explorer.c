@@ -20,6 +20,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdio.h>
+#include <unistd.h>
+
 #define COBJMACROS
 
 #include "wine/debug.h"
@@ -632,18 +635,28 @@ static IShellFolder* get_starting_shell_folder(parameters_struct* params)
     WCHAR *fullpath = NULL;
     HRESULT hres;
     DWORD size;
+    WCHAR *root = params->root;
+
+#ifdef __ANDROID__
+    static WCHAR y_drive[] = {'Y',':',0};
+
+    if (!root[0])
+    {
+        root = y_drive;
+    }
+#endif
 
     SHGetDesktopFolder(&desktop);
-    if (!params->root[0])
+    if (!root[0])
     {
         return desktop;
     }
 
-    size = GetFullPathNameW(params->root, 0, fullpath, NULL);
+    size = GetFullPathNameW(root, 0, fullpath, NULL);
     if (!size)
         return desktop;
     fullpath = heap_alloc(size * sizeof(WCHAR));
-    GetFullPathNameW(params->root, size, fullpath, NULL);
+    GetFullPathNameW(root, size, fullpath, NULL);
 
     hres = IShellFolder_ParseDisplayName(desktop,NULL,NULL,
                                          fullpath,NULL,

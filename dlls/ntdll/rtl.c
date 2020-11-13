@@ -411,7 +411,7 @@ PVOID WINAPI RtlInitializeGenericTable(PVOID pTable, PVOID arg2, PVOID arg3, PVO
 /******************************************************************************
  *  RtlEnumerateGenericTableWithoutSplaying           [NTDLL.@]
  */
-PVOID RtlEnumerateGenericTableWithoutSplaying(PVOID pTable, PVOID *RestartKey)
+PVOID WINAPI RtlEnumerateGenericTableWithoutSplaying(PVOID pTable, PVOID *RestartKey)
 {
     static int warn_once;
 
@@ -423,7 +423,7 @@ PVOID RtlEnumerateGenericTableWithoutSplaying(PVOID pTable, PVOID *RestartKey)
 /******************************************************************************
  *  RtlNumberGenericTableElements           [NTDLL.@]
  */
-ULONG RtlNumberGenericTableElements(PVOID pTable)
+ULONG WINAPI RtlNumberGenericTableElements(PVOID pTable)
 {
     FIXME("(%p) stub!\n", pTable);
     return 0;
@@ -632,6 +632,12 @@ __ASM_GLOBAL_FUNC(NTDLL_RtlUlongByteSwap,
                   "movl %ecx,%eax\n\t"
                   "bswap %eax\n\t"
                   "ret")
+#elif defined(__i386_on_x86_64__)
+extern void CDECL NTDLL_RtlUlongByteSwap(void);
+__ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(NTDLL_RtlUlongByteSwap),
+                    "movl %ecx,%eax\n\t"
+                    "bswap %eax\n\t"
+                    "ret")
 #endif
 
 /*************************************************************************
@@ -647,6 +653,12 @@ __ASM_GLOBAL_FUNC(NTDLL_RtlUshortByteSwap,
                   "movb %ch,%al\n\t"
                   "movb %cl,%ah\n\t"
                   "ret")
+#elif defined(__i386_on_x86_64__)
+extern void CDECL NTDLL_RtlUshortByteSwap(void);
+__ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(NTDLL_RtlUshortByteSwap),
+                    "movb %ch,%al\n\t"
+                    "movb %cl,%ah\n\t"
+                    "ret")
 #endif
 
 

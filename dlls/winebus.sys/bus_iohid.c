@@ -27,6 +27,7 @@
 #define LPDWORD UInt32*
 #define LONG SInt32
 #define LPLONG SInt32*
+#define LPVOID __carbon_LPVOID
 #define E_PENDING __carbon_E_PENDING
 #define ULONG __carbon_ULONG
 #define E_INVALIDARG __carbon_E_INVALIDARG
@@ -51,6 +52,7 @@
 #define PAGE_SHIFT __carbon_PAGE_SHIFT
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hid/IOHIDLib.h>
+#undef LPVOID
 #undef ULONG
 #undef E_INVALIDARG
 #undef E_OUTOFMEMORY
@@ -128,15 +130,15 @@ static DWORD CFNumberToDWORD(CFNumberRef num)
     return dwNum;
 }
 
-static void handle_IOHIDDeviceIOHIDReportCallback(void *context,
-        IOReturn result, void *sender, IOHIDReportType type,
-        uint32_t reportID, uint8_t *report, CFIndex report_length)
+static void handle_IOHIDDeviceIOHIDReportCallback(void * HOSTPTR context,
+        IOReturn result, void * HOSTPTR sender, IOHIDReportType type,
+        uint32_t reportID, uint8_t * HOSTPTR report, CFIndex report_length)
 {
-    DEVICE_OBJECT *device = (DEVICE_OBJECT*)context;
+    DEVICE_OBJECT *device = ADDRSPACECAST(DEVICE_OBJECT*, context);
     process_hid_report(device, report, report_length);
 }
 
-static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
+static int compare_platform_device(DEVICE_OBJECT *device, void * HOSTPTR platform_dev)
 {
     struct platform_private *private = impl_from_DEVICE_OBJECT(device);
     IOHIDDeviceRef dev2 = (IOHIDDeviceRef)platform_dev;
@@ -279,7 +281,7 @@ static const platform_vtbl iohid_vtbl =
     set_feature_report,
 };
 
-static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
+static void handle_DeviceMatchingCallback(void * HOSTPTR context, IOReturn result, void * HOSTPTR sender, IOHIDDeviceRef IOHIDDevice)
 {
     DEVICE_OBJECT *device;
     DWORD vid, pid, version, uid;
@@ -358,7 +360,7 @@ static void handle_DeviceMatchingCallback(void *context, IOReturn result, void *
     }
 }
 
-static void handle_RemovalCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef IOHIDDevice)
+static void handle_RemovalCallback(void * HOSTPTR context, IOReturn result, void * HOSTPTR sender, IOHIDDeviceRef IOHIDDevice)
 {
     DEVICE_OBJECT *device;
     TRACE("OS/X IOHID Device Removed %p\n", IOHIDDevice);

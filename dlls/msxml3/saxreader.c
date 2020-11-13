@@ -467,7 +467,7 @@ static BSTR build_qname(BSTR prefix, BSTR local)
 }
 
 static element_entry* alloc_element_entry(const xmlChar *local, const xmlChar *prefix, int nb_ns,
-    const xmlChar **namespaces)
+    const xmlChar ** HOSTPTR namespaces)
 {
     element_entry *ret;
     int i;
@@ -544,7 +544,7 @@ static BSTR find_element_uri(saxlocator *locator, const xmlChar *uri)
     }
 
     SysFreeString(uriW);
-    ERR("namespace uri not found, %s\n", debugstr_a((char*)uri));
+    ERR("namespace uri not found, %s\n", debugstr_a((char* HOSTPTR)uri));
     return NULL;
 }
 
@@ -616,12 +616,12 @@ static BSTR bstr_from_xmlCharN(const xmlChar *buf, int len)
     if (!buf)
         return NULL;
 
-    dLen = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)buf, len, NULL, 0);
+    dLen = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, NULL, 0);
     if(len != -1) dLen++;
     bstr = SysAllocStringLen(NULL, dLen-1);
     if (!bstr)
         return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)buf, len, bstr, dLen);
+    MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, bstr, dLen);
     if(len != -1) bstr[dLen-1] = '\0';
 
     return bstr;
@@ -1407,13 +1407,13 @@ static BSTR saxreader_get_unescaped_value(const xmlChar *buf, int len)
     if (!buf)
         return NULL;
 
-    str_len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)buf, len, NULL, 0);
+    str_len = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, NULL, 0);
     if (len != -1) str_len++;
 
     str = heap_alloc(str_len*sizeof(WCHAR));
     if (!str) return NULL;
 
-    MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)buf, len, str, str_len);
+    MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, str, str_len);
     if (len != -1) str[str_len-1] = 0;
 
     ptrW = str;
@@ -1455,8 +1455,8 @@ static void free_attribute_values(saxlocator *locator)
 }
 
 static HRESULT SAXAttributes_populate(saxlocator *locator,
-        int nb_namespaces, const xmlChar **xmlNamespaces,
-        int nb_attributes, const xmlChar **xmlAttributes)
+        int nb_namespaces, const xmlChar ** HOSTPTR xmlNamespaces,
+        int nb_attributes, const xmlChar ** HOSTPTR xmlAttributes)
 {
     static const xmlChar xmlns[] = "xmlns";
     static const WCHAR xmlnsW[] = { 'x','m','l','n','s',0 };
@@ -1527,10 +1527,12 @@ static HRESULT SAXAttributes_populate(saxlocator *locator,
     return S_OK;
 }
 
+#include "wine/hostptraddrspace_enter.h"
+
 /*** LibXML callbacks ***/
 static void libxmlStartDocument(void *ctx)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxcontenthandler_iface *handler = saxreader_get_contenthandler(This->saxreader);
     HRESULT hr;
 
@@ -1570,7 +1572,7 @@ static void libxmlStartDocument(void *ctx)
 
 static void libxmlEndDocument(void *ctx)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxcontenthandler_iface *handler = saxreader_get_contenthandler(This->saxreader);
     HRESULT hr;
 
@@ -1609,7 +1611,7 @@ static void libxmlStartElementNS(
         int nb_defaulted,
         const xmlChar **attributes)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxcontenthandler_iface *handler = saxreader_get_contenthandler(This->saxreader);
     element_entry *element;
     HRESULT hr = S_OK;
@@ -1683,7 +1685,7 @@ static void libxmlEndElementNS(
         const xmlChar *prefix,
         const xmlChar *URI)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxcontenthandler_iface *handler = saxreader_get_contenthandler(This->saxreader);
     element_entry *element;
     const xmlChar *p;
@@ -1782,7 +1784,7 @@ static void libxmlCharacters(
         const xmlChar *ch,
         int len)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     BSTR Chars;
     HRESULT hr;
     xmlChar *cur, *end;
@@ -1871,7 +1873,7 @@ static void libxmlSetDocumentLocator(
         void *ctx,
         xmlSAXLocatorPtr loc)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxcontenthandler_iface *handler = saxreader_get_contenthandler(This->saxreader);
     HRESULT hr = S_OK;
 
@@ -1890,7 +1892,7 @@ static void libxmlSetDocumentLocator(
 
 static void libxmlComment(void *ctx, const xmlChar *value)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxlexicalhandler_iface *handler = saxreader_get_lexicalhandler(This->saxreader);
     BSTR bValue;
     HRESULT hr;
@@ -1924,7 +1926,7 @@ static void libxmlComment(void *ctx, const xmlChar *value)
 
 static void libxmlFatalError(void *ctx, const char *msg, ...)
 {
-    saxlocator *This = ctx;
+    saxlocator *This = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxerrorhandler_iface *handler = saxreader_get_errorhandler(This->saxreader);
     char message[1024];
     WCHAR *error;
@@ -1974,6 +1976,8 @@ static void libxmlFatalError(void *ctx, const char *msg, ...)
     This->ret = E_FAIL;
 }
 
+#include "wine/hostptraddrspace_exit.h"
+
 /* The only reason this helper exists is that CDATA section are reported by chunks,
    newlines are used as delimiter. More than that, reader even alters input data before reporting.
 
@@ -2014,10 +2018,12 @@ static BSTR saxreader_get_cdata_chunk(const xmlChar *str, int len)
     return ret;
 }
 
+#include "wine/hostptraddrspace_enter.h"
+
 static void libxml_cdatablock(void *ctx, const xmlChar *value, int len)
 {
     const xmlChar *start, *end;
-    saxlocator *locator = ctx;
+    saxlocator *locator = ADDRSPACECAST(void * WIN32PTR, ctx);
     struct saxlexicalhandler_iface *lexical = saxreader_get_lexicalhandler(locator->saxreader);
     HRESULT hr = S_OK;
     BSTR chars;
@@ -2095,6 +2101,8 @@ static xmlParserInputPtr libxmlresolveentity(void *ctx, const xmlChar *publicid,
     FIXME("entity resolving not implemented, %s, %s\n", publicid, systemid);
     return xmlSAX2ResolveEntity(ctx, publicid, systemid);
 }
+
+#include "wine/hostptraddrspace_exit.h"
 
 /*** IVBSAXLocator interface ***/
 /*** IUnknown methods ***/

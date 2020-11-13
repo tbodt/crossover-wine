@@ -1201,6 +1201,7 @@
 @ stdcall -import ReadFileEx(long ptr long ptr ptr)
 @ stdcall -import ReadFileScatter(long ptr long ptr ptr)
 @ stdcall -import ReadProcessMemory(long ptr ptr long ptr)
+@ stdcall -arch=x86_32on64 wine_ReadProcessMemory_HOSTPTR(long int64 ptr long int64)
 # @ stub ReadThreadProfilingData
 @ stdcall -private -import RegCloseKey(long)
 @ stdcall -private -import RegCreateKeyExA(long str long ptr long long ptr ptr ptr)
@@ -1631,6 +1632,7 @@
 @ stdcall WritePrivateProfileStructA (str str ptr long str)
 @ stdcall WritePrivateProfileStructW(wstr wstr ptr long wstr)
 @ stdcall -import WriteProcessMemory(long ptr ptr long ptr)
+@ stdcall -arch=x86_32on64 wine_WriteProcessMemory_HOSTPTR(long int64 ptr long ptr)
 @ stdcall WriteProfileSectionA(str str)
 @ stdcall WriteProfileSectionW(wstr wstr)
 @ stdcall WriteProfileStringA(str str str)
@@ -1687,3 +1689,8 @@
 
 # Init code
 @ cdecl -norelay -private __wine_start_process()
+
+@ stdcall -arch=x86_32on64 wine_MultiByteToWideChar_HOSTPTR(long long int64 long int64 long)
+@ stdcall -arch=x86_32on64 wine_WideCharToMultiByte_HOSTPTR(long long int64 long int64 long int64 int64)
+@ stdcall -arch=x86_32on64 wine_IsBadStringPtrA_HOSTPTR(int64 int64)
+@ stdcall -arch=x86_32on64 wine_IsBadStringPtrW_HOSTPTR(int64 int64)

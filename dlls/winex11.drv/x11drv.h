@@ -464,6 +464,7 @@ enum x11drv_atoms
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
     XATOM__NET_WM_WINDOW_TYPE_UTILITY,
     XATOM__NET_WORKAREA,
+    XATOM__GTK_WORKAREAS_D0,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
     XATOM_XdndAware,
@@ -498,6 +499,8 @@ enum x11drv_atoms
     XATOM_text_rtf,
     XATOM_text_richtext,
     XATOM_text_uri_list,
+    XATOM__CX_WORKAREA, /* CodeWeavers Hack bug 5752 */
+    XATOM__CX_APPLEWM_TAG, /* CodeWeavers Hack bug 9517 */
     NB_XATOMS
 };
 
@@ -645,7 +648,7 @@ extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_host_primary_monitor_rect(void) DECLSPEC_HIDDEN;
-extern void query_work_area( RECT *rc_work ) DECLSPEC_HIDDEN;
+extern HRGN query_work_area(void) DECLSPEC_HIDDEN;
 extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 
 struct x11drv_mode_info
@@ -667,7 +670,7 @@ unsigned int X11DRV_Settings_GetModeCount(void) DECLSPEC_HIDDEN;
 void X11DRV_Settings_Init(void) DECLSPEC_HIDDEN;
 struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
                                                      int (*pNewGCM)(void),
-                                                     LONG (*pNewSCM)(int),
+                                                     LONG (*pNewSCM)(int, struct x11drv_mode_info *),
                                                      unsigned int nmodes,
                                                      int reserve_depths) DECLSPEC_HIDDEN;
 
@@ -783,5 +786,7 @@ static inline BOOL is_window_rect_fullscreen( const RECT *rect )
     return (rect->left <= primary_rect.left && rect->right >= primary_rect.right &&
             rect->top <= primary_rect.top && rect->bottom >= primary_rect.bottom);
 }
+
+extern BOOL enable_shm_surface DECLSPEC_HIDDEN;
 
 #endif  /* __WINE_X11DRV_H */

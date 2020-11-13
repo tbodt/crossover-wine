@@ -2487,6 +2487,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
             return stat;
     }
 
+    if (graphics->temp_hdc)
+    {
+        DeleteDC(graphics->temp_hdc);
+        graphics->temp_hdc = NULL;
+    }
+
     if(graphics->owndc)
         ReleaseDC(graphics->hwnd, graphics->hdc);
 
@@ -6604,7 +6610,15 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
         if (!hbitmap)
             return GenericError;
 
-        temp_hdc = CreateCompatibleDC(0);
+        if (!graphics->temp_hdc)
+        {
+            temp_hdc = CreateCompatibleDC(0);
+        }
+        else
+        {
+            temp_hdc = graphics->temp_hdc;
+        }
+
         if (!temp_hdc)
         {
             DeleteObject(hbitmap);
@@ -6665,9 +6679,7 @@ GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
             graphics->temp_hbitmap_width * 4, PixelFormat32bppARGB);
 
         /* Clean up. */
-        DeleteDC(graphics->temp_hdc);
         DeleteObject(graphics->temp_hbitmap);
-        graphics->temp_hdc = NULL;
         graphics->temp_hbitmap = NULL;
     }
     else if (hdc != graphics->hdc)
@@ -6719,6 +6731,7 @@ GpStatus gdi_transform_acquire(GpGraphics *graphics)
     if (graphics->gdi_transform_acquire_count == 0 && graphics->hdc)
     {
         graphics->gdi_transform_save = SaveDC(graphics->hdc);
+        ModifyWorldTransform(graphics->hdc, NULL, MWT_IDENTITY);
         SetGraphicsMode(graphics->hdc, GM_COMPATIBLE);
         SetMapMode(graphics->hdc, MM_TEXT);
         SetWindowOrgEx(graphics->hdc, 0, 0, NULL);

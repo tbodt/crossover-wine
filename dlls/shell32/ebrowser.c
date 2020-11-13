@@ -615,6 +615,7 @@ static LRESULT navpane_on_wm_create(HWND hwnd, CREATESTRUCTW *crs)
              * Add the default roots
              */
 
+#ifndef __ANDROID__
             /* TODO: This should be FOLDERID_Links */
             hr = SHGetSpecialFolderLocation(NULL, CSIDL_FAVORITES, &pidl);
             if(SUCCEEDED(hr))
@@ -627,8 +628,10 @@ static LRESULT navpane_on_wm_create(HWND hwnd, CREATESTRUCTW *crs)
                 }
                 ILFree(pidl);
             }
+#endif
 
             SHGetDesktopFolder(&psfdesktop);
+#ifndef __ANDROID__
             hr = SHGetItemFromObject((IUnknown*)psfdesktop, &IID_IShellItem, (void**)&psi);
             IShellFolder_Release(psfdesktop);
             if(SUCCEEDED(hr))
@@ -636,7 +639,25 @@ static LRESULT navpane_on_wm_create(HWND hwnd, CREATESTRUCTW *crs)
                 hr = INameSpaceTreeControl2_AppendRoot(pnstc2, psi, SHCONTF_FOLDERS, NSTCRS_EXPANDED, NULL);
                 IShellItem_Release(psi);
             }
+#else
+            {
+                static WCHAR y_drive[] = {'Y',':',0};
 
+                hr = IShellFolder_ParseDisplayName(psfdesktop, NULL, NULL, y_drive, NULL, &pidl, NULL);
+
+                if(SUCCEEDED(hr)){
+                    hr = SHCreateShellItem(NULL, NULL, pidl, &psi);
+
+                    if(SUCCEEDED(hr))
+                    {
+                        hr = INameSpaceTreeControl2_AppendRoot(pnstc2, psi, SHCONTF_FOLDERS, NSTCRS_EXPANDED, NULL);
+                        IShellItem_Release(psi);
+                    }
+                    ILFree(pidl);
+                }
+                IShellFolder_Release(psfdesktop);
+            }
+#endif
             /* TODO:
              * We should advertise IID_INameSpaceTreeControl to the site of the
              * host through its IProfferService interface, if any.

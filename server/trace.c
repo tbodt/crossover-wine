@@ -3308,6 +3308,30 @@ static void dump_get_surface_region_reply( const struct get_surface_region_reply
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
+static void dump_create_shm_surface_request( const struct create_shm_surface_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", mapping_size=%u", req->mapping_size );
+}
+
+static void dump_create_shm_surface_reply( const struct create_shm_surface_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", mapping=%04x", req->mapping );
+}
+
+static void dump_lock_shm_surface_request( const struct lock_shm_surface_request *req )
+{
+    fprintf( stderr, " surface=%04x", req->surface );
+    fprintf( stderr, ", lock=%d", req->lock );
+}
+
+static void dump_flush_shm_surface_request( const struct flush_shm_surface_request *req )
+{
+    fprintf( stderr, " surface=%04x", req->surface );
+    dump_rectangle( ", bounds=", &req->bounds );
+}
+
 static void dump_get_window_region_request( const struct get_window_region_request *req )
 {
     fprintf( stderr, " window=%08x", req->window );
@@ -4608,6 +4632,63 @@ static void dump_resume_process_request( const struct resume_process_request *re
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
+static void dump_create_esync_request( const struct create_esync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", initval=%d", req->initval );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", max=%d", req->max );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_esync_reply( const struct create_esync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_open_esync_request( const struct open_esync_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, ", type=%d", req->type );
+    dump_varargs_unicode_str( ", name=", cur_size );
+}
+
+static void dump_open_esync_reply( const struct open_esync_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_get_esync_read_fd_request( const struct get_esync_read_fd_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_esync_read_fd_reply( const struct get_esync_read_fd_reply *req )
+{
+    fprintf( stderr, " type=%d", req->type );
+    fprintf( stderr, ", shm_idx=%08x", req->shm_idx );
+}
+
+static void dump_get_esync_write_fd_request( const struct get_esync_write_fd_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_esync_apc_fd_request( const struct get_esync_apc_fd_request *req )
+{
+}
+
+static void dump_esync_msgwait_request( const struct esync_msgwait_request *req )
+{
+    fprintf( stderr, " in_msgwait=%d", req->in_msgwait );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_exec_process_request,
@@ -4785,6 +4866,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_windows_offset_request,
     (dump_func)dump_get_visible_region_request,
     (dump_func)dump_get_surface_region_request,
+    (dump_func)dump_create_shm_surface_request,
+    (dump_func)dump_lock_shm_surface_request,
+    (dump_func)dump_flush_shm_surface_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
     (dump_func)dump_get_update_region_request,
@@ -4906,6 +4990,12 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_terminate_job_request,
     (dump_func)dump_suspend_process_request,
     (dump_func)dump_resume_process_request,
+    (dump_func)dump_create_esync_request,
+    (dump_func)dump_open_esync_request,
+    (dump_func)dump_get_esync_read_fd_request,
+    (dump_func)dump_get_esync_write_fd_request,
+    (dump_func)dump_get_esync_apc_fd_request,
+    (dump_func)dump_esync_msgwait_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -5085,6 +5175,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_windows_offset_reply,
     (dump_func)dump_get_visible_region_reply,
     (dump_func)dump_get_surface_region_reply,
+    (dump_func)dump_create_shm_surface_reply,
+    NULL,
+    NULL,
     (dump_func)dump_get_window_region_reply,
     NULL,
     (dump_func)dump_get_update_region_reply,
@@ -5203,6 +5296,12 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    NULL,
+    NULL,
+    NULL,
+    (dump_func)dump_create_esync_reply,
+    (dump_func)dump_open_esync_reply,
+    (dump_func)dump_get_esync_read_fd_reply,
     NULL,
     NULL,
     NULL,
@@ -5385,6 +5484,9 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_windows_offset",
     "get_visible_region",
     "get_surface_region",
+    "create_shm_surface",
+    "lock_shm_surface",
+    "flush_shm_surface",
     "get_window_region",
     "set_window_region",
     "get_update_region",
@@ -5506,6 +5608,12 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "terminate_job",
     "suspend_process",
     "resume_process",
+    "create_esync",
+    "open_esync",
+    "get_esync_read_fd",
+    "get_esync_write_fd",
+    "get_esync_apc_fd",
+    "esync_msgwait",
 };
 
 static const struct
@@ -5562,6 +5670,7 @@ static const struct
     { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_DEVICE_REQUEST",      STATUS_INVALID_DEVICE_REQUEST },
+    { "INVALID_DEVICE_STATE",        STATUS_INVALID_DEVICE_STATE },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
     { "INVALID_HANDLE",              STATUS_INVALID_HANDLE },
     { "INVALID_IMAGE_FORMAT",        STATUS_INVALID_IMAGE_FORMAT },
@@ -5573,6 +5682,7 @@ static const struct
     { "INVALID_LOCK_SEQUENCE",       STATUS_INVALID_LOCK_SEQUENCE },
     { "INVALID_OWNER",               STATUS_INVALID_OWNER },
     { "INVALID_PARAMETER",           STATUS_INVALID_PARAMETER },
+    { "INVALID_PARAMETER_4",         STATUS_INVALID_PARAMETER_4 },
     { "INVALID_PIPE_STATE",          STATUS_INVALID_PIPE_STATE },
     { "INVALID_READ_MODE",           STATUS_INVALID_READ_MODE },
     { "INVALID_SECURITY_DESCR",      STATUS_INVALID_SECURITY_DESCR },

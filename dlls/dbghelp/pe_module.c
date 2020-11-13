@@ -468,7 +468,7 @@ static BOOL pe_load_coff_symbol_table(struct module* module)
  */
 static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
 {
-    struct image_file_map*      fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
+    struct image_file_map* WIN32PTR fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
     struct image_section_map    sect_stabs, sect_stabstr;
     BOOL                        ret = FALSE;
 
@@ -477,8 +477,8 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
         const char* stab;
         const char* stabstr;
 
-        stab = image_map_section(&sect_stabs);
-        stabstr = image_map_section(&sect_stabstr);
+        stab = ADDRSPACECAST(const char*, image_map_section(&sect_stabs));
+        stabstr = ADDRSPACECAST(const char*, image_map_section(&sect_stabstr));
         if (stab != IMAGE_NO_MAP && stabstr != IMAGE_NO_MAP)
         {
             ret = stabs_parse(module,
@@ -504,7 +504,7 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
  */
 static BOOL pe_load_dwarf(struct module* module)
 {
-    struct image_file_map*      fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
+    struct image_file_map* WIN32PTR fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
     BOOL                        ret;
 
     ret = dwarf2_parse(module,

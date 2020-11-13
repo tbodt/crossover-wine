@@ -625,9 +625,9 @@ typedef struct tagBracketPair
     int end;
 } BracketPair;
 
-static int bracketpair_compr(const void *a, const void* b)
+static int bracketpair_compr(const void * HOSTPTR a, const void* HOSTPTR b)
 {
-    return ((BracketPair*)a)->start - ((BracketPair*)b)->start;
+    return ((BracketPair* HOSTPTR)a)->start - ((BracketPair* HOSTPTR)b)->start;
 }
 
 static BracketPair *bidi_compute_bracket_pairs(IsolatedRun *iso_run)

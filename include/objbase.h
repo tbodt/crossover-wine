@@ -22,6 +22,8 @@
 #ifndef _OBJBASE_H_
 #define _OBJBASE_H_
 
+#include "wine/winheader_enter.h"
+
 /*****************************************************************************
  * Macros to define a COM interface
  */
@@ -512,5 +514,7 @@ HRESULT WINAPI StgSetTimes( OLECHAR const *lpszName, FILETIME const *pctime, FIL
 #define WINOLEAPI_(type) STDAPI_(type)
 
 #endif /* __WINESRC__ */
+
+#include "wine/winheader_exit.h"
 
 #endif /* _OBJBASE_H_ */

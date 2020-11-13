@@ -19,6 +19,8 @@
 #ifndef __NTIFS_H__
 #define __NTIFS_H__
 
+#include "wine/winheader_enter.h"
+
 #include "ntddk.h"
 
 typedef struct _EX_PUSH_LOCK EX_PUSH_LOCK, *PEX_PUSH_LOCK;
@@ -138,5 +140,7 @@ BOOLEAN WINAPI PsIsSystemThread(PETHREAD);
 NTSTATUS WINAPI PsLookupProcessByProcessId(HANDLE,PEPROCESS*);
 NTSTATUS WINAPI PsLookupThreadByThreadId(HANDLE,PETHREAD*);
 void WINAPI PsRevertToSelf(void);
+
+#include "wine/winheader_exit.h"
 
 #endif

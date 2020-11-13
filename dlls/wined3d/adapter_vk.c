@@ -236,7 +236,7 @@ static HRESULT adapter_vk_create_device(struct wined3d *wined3d, const struct wi
 
     device_vk->vk_info = *vk_info;
 #define LOAD_DEVICE_PFN(name) \
-    if (!(device_vk->vk_info.vk_ops.name = (void *)VK_CALL(vkGetDeviceProcAddr(vk_device, #name)))) \
+    if (!(device_vk->vk_info.vk_ops.name = (void * VKPTR)VK_CALL(vkGetDeviceProcAddr(vk_device, #name)))) \
     { \
         WARN("Could not get device proc addr for '" #name "'.\n"); \
         hr = E_FAIL; \
@@ -905,7 +905,7 @@ vulkan_instance_extensions[] =
 };
 
 static BOOL enable_vulkan_instance_extensions(uint32_t *extension_count,
-        const char *enabled_extensions[], const struct wined3d_vk_info *vk_info)
+        const char * VKPTR enabled_extensions[], const struct wined3d_vk_info *vk_info)
 {
     PFN_vkEnumerateInstanceExtensionProperties pfn_vkEnumerateInstanceExtensionProperties;
     VkExtensionProperties *extensions = NULL;
@@ -916,7 +916,7 @@ static BOOL enable_vulkan_instance_extensions(uint32_t *extension_count,
     *extension_count = 0;
 
     if (!(pfn_vkEnumerateInstanceExtensionProperties
-            = (void *)VK_CALL(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceExtensionProperties"))))
+            = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceExtensionProperties"))))
     {
         WARN("Failed to get 'vkEnumerateInstanceExtensionProperties'.\n");
         goto done;
@@ -971,7 +971,7 @@ done:
 
 static BOOL wined3d_init_vulkan(struct wined3d_vk_info *vk_info)
 {
-    const char *enabled_instance_extensions[ARRAY_SIZE(vulkan_instance_extensions)];
+    const char * VKPTR enabled_instance_extensions[ARRAY_SIZE(vulkan_instance_extensions)];
     PFN_vkEnumerateInstanceVersion pfn_vkEnumerateInstanceVersion;
     struct vulkan_ops *vk_ops = &vk_info->vk_ops;
     VkInstance instance = VK_NULL_HANDLE;
@@ -984,14 +984,14 @@ static BOOL wined3d_init_vulkan(struct wined3d_vk_info *vk_info)
     if (!wined3d_load_vulkan(vk_info))
         return FALSE;
 
-    if (!(vk_ops->vkCreateInstance = (void *)VK_CALL(vkGetInstanceProcAddr(NULL, "vkCreateInstance"))))
+    if (!(vk_ops->vkCreateInstance = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(NULL, "vkCreateInstance"))))
     {
         ERR("Failed to get 'vkCreateInstance'.\n");
         goto fail;
     }
 
     vk_info->api_version = VK_API_VERSION_1_0;
-    if ((pfn_vkEnumerateInstanceVersion = (void *)VK_CALL(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion")))
+    if ((pfn_vkEnumerateInstanceVersion = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion")))
             && pfn_vkEnumerateInstanceVersion(&api_version) == VK_SUCCESS)
     {
         TRACE("Vulkan instance API version %s.\n", debug_vk_version(api_version));
@@ -1024,13 +1024,13 @@ static BOOL wined3d_init_vulkan(struct wined3d_vk_info *vk_info)
     TRACE("Created Vulkan instance %p.\n", instance);
 
 #define LOAD_INSTANCE_PFN(name) \
-    if (!(vk_ops->name = (void *)VK_CALL(vkGetInstanceProcAddr(instance, #name)))) \
+    if (!(vk_ops->name = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(instance, #name)))) \
     { \
         WARN("Could not get instance proc addr for '" #name "'.\n"); \
         goto fail; \
     }
 #define LOAD_INSTANCE_OPT_PFN(name) \
-    vk_ops->name = (void *)VK_CALL(vkGetInstanceProcAddr(instance, #name));
+    vk_ops->name = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(instance, #name));
 #define VK_INSTANCE_PFN     LOAD_INSTANCE_PFN
 #define VK_INSTANCE_EXT_PFN LOAD_INSTANCE_OPT_PFN
 #define VK_DEVICE_PFN       LOAD_INSTANCE_PFN
@@ -1042,7 +1042,7 @@ static BOOL wined3d_init_vulkan(struct wined3d_vk_info *vk_info)
 
 #define MAP_INSTANCE_FUNCTION(core_pfn, ext_pfn) \
     if (!vk_ops->core_pfn) \
-        vk_ops->core_pfn = (void *)VK_CALL(vkGetInstanceProcAddr(instance, #ext_pfn));
+        vk_ops->core_pfn = (void * VKPTR)VK_CALL(vkGetInstanceProcAddr(instance, #ext_pfn));
     MAP_INSTANCE_FUNCTION(vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceProperties2KHR)
 #undef MAP_INSTANCE_FUNCTION
 
@@ -1101,7 +1101,7 @@ static enum wined3d_display_driver guess_display_driver(enum wined3d_pci_vendor 
 }
 
 static void adapter_vk_init_driver_info(struct wined3d_adapter_vk *adapter_vk,
-        const VkPhysicalDeviceProperties *properties)
+        const VkPhysicalDeviceProperties * WIN32PTR properties)
 {
     const VkPhysicalDeviceMemoryProperties *memory_properties = &adapter_vk->memory_properties;
     const struct wined3d_gpu_description *gpu_description;

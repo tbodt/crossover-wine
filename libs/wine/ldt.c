@@ -34,7 +34,7 @@
 #include "wine/library.h"
 #include "wine/asm.h"
 
-#ifdef __i386__
+#if (defined(__i386__) || defined(__i386_on_x86_64__))
 
 #ifdef __linux__
 
@@ -100,6 +100,8 @@ static inline int set_thread_area( struct modify_ldt_s *ptr )
 
 #ifdef __APPLE__
 #include <i386/user_ldt.h>
+#include <pthread.h>
+static pthread_mutex_t ldt_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 /* local copy of the LDT */
@@ -207,8 +209,10 @@ static int internal_set_entry( unsigned short sel, const LDT_ENTRY *entry )
         if ((ret = sysi86(SI86DSCR, &ldt_mod)) == -1) perror("sysi86");
     }
 #elif defined(__APPLE__)
+    pthread_mutex_lock(&ldt_mutex);
     if ((ret = i386_set_ldt(index, (union ldt_entry *)entry, 1)) < 0)
         perror("i386_set_ldt");
+    pthread_mutex_unlock(&ldt_mutex);
 #elif defined(__GNU__)
     if ((ret = i386_set_ldt(mach_thread_self(), sel, (descriptor_list_t)entry, 1)) != KERN_SUCCESS)
         perror("i386_set_ldt");
@@ -252,6 +256,10 @@ int wine_ldt_set_entry( unsigned short sel, const LDT_ENTRY *entry )
  */
 int wine_ldt_is_system( unsigned short sel )
 {
+#ifdef __i386_on_x86_64__
+    if (sel == wine_32on64_cs32 || sel == wine_32on64_ds32)
+        return TRUE;
+#endif
     return is_gdt_sel(sel) || ((sel >> 3) < LDT_FIRST_ENTRY);
 }
 
@@ -463,7 +471,17 @@ __ASM_GLOBAL_FUNC( wine_get_es, "movw %es,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_fs, "movw %fs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_gs, "movw %gs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_ss, "movw %ss,%ax\n\tret" )
+
+#ifdef __i386__
 __ASM_GLOBAL_FUNC( wine_set_fs, "movl 4(%esp),%eax\n\tmovw %ax,%fs\n\tret" )
 __ASM_GLOBAL_FUNC( wine_set_gs, "movl 4(%esp),%eax\n\tmovw %ax,%gs\n\tret" )
+#else
+__ASM_GLOBAL_FUNC( wine_set_fs, "movw %di,%fs\n\tretq" )
+__ASM_GLOBAL_FUNC( wine_set_gs, "int $3\n\tretq" )
 
-#endif /* __i386__ */
+unsigned short wine_32on64_cs32 = 0;
+unsigned short wine_32on64_cs64 = 0;
+unsigned short wine_32on64_ds32 = 0;
+#endif
+
+#endif /* __i386__ || __i386_on_x86_64__ */

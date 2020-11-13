@@ -75,9 +75,9 @@ static HRESULT dxgi_output_find_closest_matching_mode(struct dxgi_output *output
     return hr;
 }
 
-static int dxgi_mode_desc_compare(const void *l, const void *r)
+static int dxgi_mode_desc_compare(const void * HOSTPTR l, const void * HOSTPTR r)
 {
-    const DXGI_MODE_DESC *left = l, *right = r;
+    const DXGI_MODE_DESC * HOSTPTR left = l, * HOSTPTR right = r;
     int a, b;
 
     if (left->Width != right->Width)

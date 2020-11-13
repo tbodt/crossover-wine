@@ -314,8 +314,8 @@ static const unsigned short Mp3SampleRates[2][4] =
 
 typedef struct tagAcmMpeg3Data
 {
-    LRESULT (*convert)(PACMDRVSTREAMINSTANCE adsi, unsigned char*,
-                       LPDWORD, unsigned char*, LPDWORD);
+    LRESULT (* HOSTPTR convert)(PACMDRVSTREAMINSTANCE adsi, unsigned char*,
+                                LPDWORD, unsigned char*, LPDWORD);
     AudioConverterRef acr;
     AudioStreamBasicDescription in,out;
 
@@ -325,7 +325,7 @@ typedef struct tagAcmMpeg3Data
     SInt32 tagBytesLeft;
 
     UInt32 NumberPackets;
-    AudioStreamPacketDescription *PacketDescriptions;
+    AudioStreamPacketDescription * WIN32PTR PacketDescriptions;
 } AcmMpeg3Data;
 
 /***********************************************************************
@@ -349,6 +349,9 @@ static LRESULT MPEG3_drvClose(DWORD_PTR dwDevID)
  we will in the future, so give it no packets and return an error, which
  signals that we will have more later.
  */
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#endif
 static OSStatus Mp3AudioConverterComplexInputDataProc(
    AudioConverterRef             inAudioConverter,
    UInt32                        *ioNumberDataPackets,
@@ -357,7 +360,7 @@ static OSStatus Mp3AudioConverterComplexInputDataProc(
    void                          *inUserData
 )
 {
-    AcmMpeg3Data *amd = (AcmMpeg3Data*)inUserData;
+    AcmMpeg3Data * HOSTPTR amd = (AcmMpeg3Data * HOSTPTR)inUserData;
 
     if (amd->inBuffer.mDataByteSize > 0)
     {
@@ -375,6 +378,9 @@ static OSStatus Mp3AudioConverterComplexInputDataProc(
         return -74;
     }
 }
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#endif
 
 /*
  Get the length of the current frame. We need to be at the start of a
@@ -453,7 +459,7 @@ static LRESULT mp3_leopard_horse(PACMDRVSTREAMINSTANCE adsi,
     {
         src += amd->tagBytesLeft;
         *nsrc -= amd->tagBytesLeft;
-        TRACE("Skipping %ld for ID3 tag\n", amd->tagBytesLeft);
+        TRACE("Skipping %d for ID3 tag\n", (int)amd->tagBytesLeft);
     }
 
     /*
@@ -484,7 +490,7 @@ static LRESULT mp3_leopard_horse(PACMDRVSTREAMINSTANCE adsi,
                 syncSkip = psrc - src;
                 src += syncSkip;
                 *nsrc -= syncSkip;
-                TRACE("Skipping %ld for frame sync\n", syncSkip);
+                TRACE("Skipping %u for frame sync\n", (unsigned int)syncSkip);
             }
             break;
         }
@@ -568,7 +574,7 @@ static LRESULT mp3_leopard_horse(PACMDRVSTREAMINSTANCE adsi,
     if (err != noErr && err != -74)
     {
         *ndst = *nsrc = 0;
-        ERR("Feed Error: %ld\n", err);
+        ERR("Feed Error: %d\n", (int)err);
         return MMSYSERR_ERROR;
     }
 
@@ -638,7 +644,7 @@ static LRESULT MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
         err = AudioConverterNew(&aad->in, &aad->out, &aad->acr);
         if (err != noErr)
         {
-            ERR("Create failed: %ld\n", err);
+            ERR("Create failed: %d\n", (int)err);
         }
         else
         {
@@ -976,7 +982,7 @@ LRESULT CALLBACK MPEG3_DriverProc(DWORD_PTR dwDevID, HDRVR hDriv, UINT wMsg,
 					 LPARAM dwParam1, LPARAM dwParam2)
 {
     TRACE("(%08lx %p %04x %08lx %08lx);\n",
-	  dwDevID, hDriv, wMsg, dwParam1, dwParam2);
+	  (ULONG_HOSTPTR)dwDevID, hDriv, wMsg, (ULONG_HOSTPTR)dwParam1, (ULONG_HOSTPTR)dwParam2);
 
     switch (wMsg)
     {

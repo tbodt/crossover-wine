@@ -45,6 +45,10 @@ typedef struct __JUMP_BUFFER
 #define _JBLEN 16
 #define _JBTYPE int
 
+#elif defined(__i386_on_x86_64__)
+
+#error Can't use this header for 32-on-64-bit mode
+
 #elif defined(__x86_64__)
 
 typedef DECLSPEC_ALIGN(16) struct _SETJMP_FLOAT128

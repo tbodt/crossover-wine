@@ -128,7 +128,7 @@ int CDECL MSVCRT__set_FMA3_enable(int flag)
 }
 #endif
 
-#if !defined(__i386__) || _MSVCR_VER>=120
+#if !(defined(__i386__) || defined(__i386_on_x86_64__)) || _MSVCR_VER>=120
 
 /*********************************************************************
  *      _chgsignf (MSVCRT.@)
@@ -171,7 +171,7 @@ float CDECL MSVCRT__logbf( float num )
 
 #endif
 
-#ifndef __i386__
+#if !defined(__i386__) && !defined(__i386_on_x86_64__)
 
 /*********************************************************************
  *      _finitef (MSVCRT.@)
@@ -579,8 +579,9 @@ double CDECL MSVCRT_tanh( double x )
 }
 
 
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
 
+#ifdef __i386__
 #define CREATE_FPU_FUNC1(name, call) \
     __ASM_GLOBAL_FUNC(name, \
             "pushl   %ebp\n\t" \
@@ -655,23 +656,6 @@ double CDECL MSVCRT_tanh( double x )
             __ASM_CFI(".cfi_same_value %ebp\n\t") \
             "ret")
 
-CREATE_FPU_FUNC1(_CIacos, MSVCRT_acos)
-CREATE_FPU_FUNC1(_CIasin, MSVCRT_asin)
-CREATE_FPU_FUNC1(_CIatan, MSVCRT_atan)
-CREATE_FPU_FUNC2(_CIatan2, MSVCRT_atan2)
-CREATE_FPU_FUNC1(_CIcos, MSVCRT_cos)
-CREATE_FPU_FUNC1(_CIcosh, MSVCRT_cosh)
-CREATE_FPU_FUNC1(_CIexp, MSVCRT_exp)
-CREATE_FPU_FUNC2(_CIfmod, MSVCRT_fmod)
-CREATE_FPU_FUNC1(_CIlog, MSVCRT_log)
-CREATE_FPU_FUNC1(_CIlog10, MSVCRT_log10)
-CREATE_FPU_FUNC2(_CIpow, MSVCRT_pow)
-CREATE_FPU_FUNC1(_CIsin, MSVCRT_sin)
-CREATE_FPU_FUNC1(_CIsinh, MSVCRT_sinh)
-CREATE_FPU_FUNC1(_CIsqrt, MSVCRT_sqrt)
-CREATE_FPU_FUNC1(_CItan, MSVCRT_tan)
-CREATE_FPU_FUNC1(_CItanh, MSVCRT_tanh)
-
 __ASM_GLOBAL_FUNC(MSVCRT__ftol,
         "pushl   %ebp\n\t"
         __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -692,8 +676,124 @@ __ASM_GLOBAL_FUNC(MSVCRT__ftol,
         __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
         __ASM_CFI(".cfi_same_value %ebp\n\t")
         "ret")
+#else
+#define CREATE_FPU_FUNC1(name, call) \
+    extern void CDECL name(void); \
+    __ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(name), \
+            "pushl   %ebp\n\t" \
+            __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t") \
+            __ASM_CFI(".cfi_rel_offset %ebp,0\n\t") \
+            "movl    %esp, %ebp\n\t" \
+            __ASM_CFI(".cfi_def_cfa_register %ebp\n\t") \
+            "subl    $68, %esp\n\t" /* sizeof(double)*8 + sizeof(int) */ \
+            "fstpl   (%esp)\n\t"    /* store function argument */ \
+            "fwait\n\t" \
+            "movl    $1, %ecx\n\t"  /* empty FPU stack */ \
+            "1:\n\t" \
+            "fxam\n\t" \
+            "fstsw   %ax\n\t" \
+            "and     $0x4500, %ax\n\t" \
+            "cmp     $0x4100, %ax\n\t" \
+            "je      2f\n\t" \
+            "fstpl    (%esp,%ecx,8)\n\t" \
+            "fwait\n\t" \
+            "incl    %ecx\n\t" \
+            "jmp     1b\n\t" \
+            "2:\n\t" \
+            "movl    %ecx, -4(%ebp)\n\t" \
+            "call    " __ASM_THUNK_SYMBOL( #call ) "\n\t" \
+            "movl    -4(%ebp), %ecx\n\t" \
+            "fstpl   (%esp)\n\t"    /* save result */ \
+            "3:\n\t"                /* restore FPU stack */ \
+            "decl    %ecx\n\t" \
+            "fldl    (%esp,%ecx,8)\n\t" \
+            "cmpl    $0, %ecx\n\t" \
+            "jne     3b\n\t" \
+            "leave\n\t" \
+            __ASM_CFI(".cfi_def_cfa %esp,4\n\t") \
+            __ASM_CFI(".cfi_same_value %ebp\n\t") \
+            "ret") \
 
-#endif /* defined(__GNUC__) && defined(__i386__) */
+#define CREATE_FPU_FUNC2(name, call) \
+    extern void CDECL name(void); \
+    __ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(name), \
+            "pushl   %ebp\n\t" \
+            __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t") \
+            __ASM_CFI(".cfi_rel_offset %ebp,0\n\t") \
+            "movl    %esp, %ebp\n\t" \
+            __ASM_CFI(".cfi_def_cfa_register %ebp\n\t") \
+            "subl    $68, %esp\n\t" /* sizeof(double)*8 + sizeof(int) */ \
+            "fstpl   8(%esp)\n\t"   /* store function argument */ \
+            "fwait\n\t" \
+            "fstpl   (%esp)\n\t" \
+            "fwait\n\t" \
+            "movl    $2, %ecx\n\t"  /* empty FPU stack */ \
+            "1:\n\t" \
+            "fxam\n\t" \
+            "fstsw   %ax\n\t" \
+            "and     $0x4500, %ax\n\t" \
+            "cmp     $0x4100, %ax\n\t" \
+            "je      2f\n\t" \
+            "fstpl    (%esp,%ecx,8)\n\t" \
+            "fwait\n\t" \
+            "incl    %ecx\n\t" \
+            "jmp     1b\n\t" \
+            "2:\n\t" \
+            "movl    %ecx, -4(%ebp)\n\t" \
+            "call    " __ASM_THUNK_SYMBOL( #call ) "\n\t" \
+            "movl    -4(%ebp), %ecx\n\t" \
+            "fstpl   8(%esp)\n\t"   /* save result */ \
+            "3:\n\t"                /* restore FPU stack */ \
+            "decl    %ecx\n\t" \
+            "fldl    (%esp,%ecx,8)\n\t" \
+            "cmpl    $1, %ecx\n\t" \
+            "jne     3b\n\t" \
+            "leave\n\t" \
+            __ASM_CFI(".cfi_def_cfa %esp,4\n\t") \
+            __ASM_CFI(".cfi_same_value %ebp\n\t") \
+            "ret") \
+
+extern void CDECL MSVCRT__ftol(void);
+__ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(MSVCRT__ftol),
+                    "pushl   %ebp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl    %esp, %ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "subl    $12, %esp\n\t"     /* sizeof(LONGLONG) + 2*sizeof(WORD) */
+                    "fnstcw  (%esp)\n\t"
+                    "mov     (%esp), %ax\n\t"
+                    "or      $0xc00, %ax\n\t"
+                    "mov     %ax, 2(%esp)\n\t"
+                    "fldcw   2(%esp)\n\t"
+                    "fistpq  4(%esp)\n\t"
+                    "fldcw   (%esp)\n\t"
+                    "movl    4(%esp), %eax\n\t"
+                    "movl    8(%esp), %edx\n\t"
+                    "leave\n\t"
+                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                    __ASM_CFI(".cfi_same_value %ebp\n\t")
+                    "ret")
+#endif /* __i386__ */
+
+CREATE_FPU_FUNC1(_CIacos, MSVCRT_acos)
+CREATE_FPU_FUNC1(_CIasin, MSVCRT_asin)
+CREATE_FPU_FUNC1(_CIatan, MSVCRT_atan)
+CREATE_FPU_FUNC2(_CIatan2, MSVCRT_atan2)
+CREATE_FPU_FUNC1(_CIcos, MSVCRT_cos)
+CREATE_FPU_FUNC1(_CIcosh, MSVCRT_cosh)
+CREATE_FPU_FUNC1(_CIexp, MSVCRT_exp)
+CREATE_FPU_FUNC2(_CIfmod, MSVCRT_fmod)
+CREATE_FPU_FUNC1(_CIlog, MSVCRT_log)
+CREATE_FPU_FUNC1(_CIlog10, MSVCRT_log10)
+CREATE_FPU_FUNC2(_CIpow, MSVCRT_pow)
+CREATE_FPU_FUNC1(_CIsin, MSVCRT_sin)
+CREATE_FPU_FUNC1(_CIsinh, MSVCRT_sinh)
+CREATE_FPU_FUNC1(_CIsqrt, MSVCRT_sqrt)
+CREATE_FPU_FUNC1(_CItan, MSVCRT_tan)
+CREATE_FPU_FUNC1(_CItanh, MSVCRT_tanh)
+
+#endif /* defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__) */
 
 /*********************************************************************
  *		_fpclass (MSVCRT.@)
@@ -925,7 +1025,7 @@ double CDECL MSVCRT_modf( double x, double *iptr )
  *
  * Not exported by native msvcrt, added in msvcr80.
  */
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
 {
 #ifdef __GNUC__
@@ -972,7 +1072,7 @@ void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
 unsigned int CDECL _statusfp(void)
 {
     unsigned int flags = 0;
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
     unsigned int x86_sw, sse2_sw;
 
     _statusfp2( &x86_sw, &sse2_sw );
@@ -1000,7 +1100,7 @@ unsigned int CDECL _statusfp(void)
 unsigned int CDECL _clearfp(void)
 {
     unsigned int flags = 0;
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     unsigned long fpword;
 
     __asm__ __volatile__( "fnstsw %0; fnclex" : "=m" (fpword) );
@@ -1087,7 +1187,7 @@ double CDECL MSVCRT__chgsign(double num)
  *
  * Not exported by native msvcrt, added in msvcr80.
  */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 int CDECL __control87_2( unsigned int newval, unsigned int mask,
                          unsigned int *x86_cw, unsigned int *sse2_cw )
 {
@@ -1225,7 +1325,7 @@ int CDECL __control87_2( unsigned int newval, unsigned int mask,
 unsigned int CDECL _control87(unsigned int newval, unsigned int mask)
 {
     unsigned int flags = 0;
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     unsigned int sse2_cw;
 
     __control87_2( newval, mask, &flags, &sse2_cw );
@@ -1424,7 +1524,7 @@ int CDECL MSVCRT__finite(double num)
  */
 void CDECL _fpreset(void)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     const unsigned int x86_cw = 0x27f;
     __asm__ __volatile__( "fninit; fldcw %0" : : "m" (x86_cw) );
     if (sse2_supported)
@@ -1443,7 +1543,7 @@ void CDECL _fpreset(void)
  */
 int CDECL MSVCRT_fesetenv(const MSVCRT_fenv_t *env)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     struct {
         WORD control_word;
         WORD unused1;
@@ -2030,7 +2130,7 @@ int CDECL MSVCRT__gcvt_s(char *buff, MSVCRT_size_t size, double number, int digi
  * VERSION
  *	[i386] Windows binary compatible - returns the struct in eax/edx.
  */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 unsigned __int64 CDECL MSVCRT_div(int num, int denom)
 {
   div_t dt = div(num,denom);
@@ -2060,7 +2160,7 @@ MSVCRT_div_t CDECL MSVCRT_div(int num, int denom)
  * VERSION
  * 	[i386] Windows binary compatible - returns the struct in eax/edx.
  */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 unsigned __int64 CDECL MSVCRT_ldiv(MSVCRT_long num, MSVCRT_long denom)
 {
   ldiv_t ldt = ldiv(num,denom);
@@ -2098,7 +2198,7 @@ MSVCRT_lldiv_t* CDECL MSVCRT_lldiv(MSVCRT_lldiv_t *ret,
 }
 #endif
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /*********************************************************************
  *		_adjust_fdiv (MSVCRT.@)
@@ -2163,7 +2263,7 @@ void __stdcall _adj_fdiv_m64( unsigned __int64 arg )
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _adj_fdiv_r(void)
+void CDECL _adj_fdiv_r(void)
 {
   TRACE("(): stub\n");
 }
@@ -2225,7 +2325,7 @@ void __stdcall _adj_fdivr_m64( unsigned __int64 arg )
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _adj_fpatan(void)
+void CDECL _adj_fpatan(void)
 {
   TRACE("(): stub\n");
 }
@@ -2239,7 +2339,7 @@ void _adj_fpatan(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _adj_fprem(void)
+void CDECL _adj_fprem(void)
 {
   TRACE("(): stub\n");
 }
@@ -2253,7 +2353,7 @@ void _adj_fprem(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _adj_fprem1(void)
+void CDECL _adj_fprem1(void)
 {
   TRACE("(): stub\n");
 }
@@ -2267,7 +2367,7 @@ void _adj_fprem1(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _adj_fptan(void)
+void CDECL _adj_fptan(void)
 {
   TRACE("(): stub\n");
 }
@@ -2281,7 +2381,7 @@ void _adj_fptan(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _safe_fdiv(void)
+void CDECL _safe_fdiv(void)
 {
   TRACE("(): stub\n");
 }
@@ -2295,7 +2395,7 @@ void _safe_fdiv(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _safe_fdivr(void)
+void CDECL _safe_fdivr(void)
 {
   TRACE("(): stub\n");
 }
@@ -2309,7 +2409,7 @@ void _safe_fdivr(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _safe_fprem(void)
+void CDECL _safe_fprem(void)
 {
   TRACE("(): stub\n");
 }
@@ -2324,7 +2424,7 @@ void _safe_fprem(void)
  *    I _think_ this function is intended to work around the Pentium
  *    fdiv bug.
  */
-void _safe_fprem1(void)
+void CDECL _safe_fprem1(void)
 {
   TRACE("(): stub\n");
 }

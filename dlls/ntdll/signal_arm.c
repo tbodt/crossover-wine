@@ -1296,7 +1296,7 @@ void WINAPI DbgUserBreakPoint(void)
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-TEB * WINAPI NtCurrentTeb(void)
+TEB * WINAPI NTDLL_NtCurrentTeb(void)
 {
     return pthread_getspecific( teb_key );
 }

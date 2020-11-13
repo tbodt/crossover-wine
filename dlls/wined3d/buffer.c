@@ -243,7 +243,11 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
         TRACE("Buffer has WINED3DUSAGE_DYNAMIC set.\n");
         gl_usage = GL_STREAM_DRAW_ARB;
 
-        if (gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
+        if (cxgames_hacks.allow_glmapbuffer == WINED3D_MAPBUF_NEVER)
+        {
+            buffer_gl->b.flags |= WINED3D_BUFFER_PIN_SYSMEM;
+        }
+        else if (gl_info->supported[APPLE_FLUSH_BUFFER_RANGE])
         {
             GL_EXTCALL(glBufferParameteriAPPLE(buffer_gl->buffer_type_hint,
                     GL_BUFFER_FLUSHING_UNMAP_APPLE, GL_FALSE));
@@ -253,6 +257,10 @@ static BOOL wined3d_buffer_gl_create_buffer_object(struct wined3d_buffer_gl *buf
             buffer_gl->b.flags |= WINED3D_BUFFER_APPLESYNC;
         }
         /* No setup is needed here for GL_ARB_map_buffer_range. */
+    }
+    else if (cxgames_hacks.allow_glmapbuffer == WINED3D_MAPBUF_NEVER)
+    {
+        buffer_gl->b.flags |= WINED3D_BUFFER_PIN_SYSMEM;
     }
 
     GL_EXTCALL(glBufferData(buffer_gl->buffer_type_hint, buffer_gl->b.resource.size, NULL, gl_usage));
@@ -988,7 +996,7 @@ static HRESULT buffer_resource_sub_resource_map(struct wined3d_resource *resourc
     struct wined3d_device *device = resource->device;
     struct wined3d_context *context;
     unsigned int offset, size;
-    uint8_t *base;
+    uint8_t * WIN32PTR base;
     LONG count;
 
     TRACE("resource %p, sub_resource_idx %u, map_desc %p, box %s, flags %#x.\n",

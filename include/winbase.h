@@ -19,7 +19,10 @@
 #ifndef __WINE_WINBASE_H
 #define __WINE_WINBASE_H
 
+#include "wine/winheader_enter.h"
+
 #include <winerror.h>
+#include <wine/asm.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -2393,7 +2396,13 @@ WINBASEAPI BOOL        WINAPI IsBadHugeReadPtr(LPCVOID,UINT_PTR);
 WINBASEAPI BOOL        WINAPI IsBadHugeWritePtr(LPVOID,UINT_PTR);
 WINBASEAPI BOOL        WINAPI IsBadReadPtr(LPCVOID,UINT_PTR);
 WINBASEAPI BOOL        WINAPI IsBadStringPtrA(LPCSTR,UINT_PTR);
+#ifdef __i386_on_x86_64__
+WINBASEAPI BOOL        WINAPI IsBadStringPtrA(const char * HOSTPTR,ULONGLONG) __attribute__((overloadable)) asm(__ASM_NAME("wine_IsBadStringPtrA_HOSTPTR"));
+#endif
 WINBASEAPI BOOL        WINAPI IsBadStringPtrW(LPCWSTR,UINT_PTR);
+#ifdef __i386_on_x86_64__
+WINBASEAPI BOOL        WINAPI IsBadStringPtrW(const WCHAR * HOSTPTR,ULONGLONG) __attribute__((overloadable)) asm(__ASM_NAME("wine_IsBadStringPtrW_HOSTPTR"));
+#endif
 #define                       IsBadStringPtr WINELIB_NAME_AW(IsBadStringPtr)
 WINBASEAPI BOOL        WINAPI IsBadWritePtr(LPVOID,UINT_PTR);
 WINBASEAPI BOOL        WINAPI IsDebuggerPresent(void);
@@ -2566,6 +2575,9 @@ WINBASEAPI BOOL        WINAPI ReadFile(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED)
 WINBASEAPI BOOL        WINAPI ReadFileEx(HANDLE,LPVOID,DWORD,LPOVERLAPPED,LPOVERLAPPED_COMPLETION_ROUTINE);
 WINBASEAPI BOOL        WINAPI ReadFileScatter(HANDLE,FILE_SEGMENT_ELEMENT*,DWORD,LPDWORD,LPOVERLAPPED);
 WINBASEAPI BOOL        WINAPI ReadProcessMemory(HANDLE,LPCVOID,LPVOID,SIZE_T,SIZE_T*);
+#ifdef __i386_on_x86_64__
+WINBASEAPI BOOL        WINAPI ReadProcessMemory(HANDLE,const void * HOSTPTR,void *,SIZE_T,SIZE_T* HOSTPTR) __attribute__((overloadable)) asm(__ASM_NAME("wine_ReadProcessMemory_HOSTPTR"));
+#endif
 WINADVAPI  HANDLE      WINAPI RegisterEventSourceA(LPCSTR,LPCSTR);
 WINADVAPI  HANDLE      WINAPI RegisterEventSourceW(LPCWSTR,LPCWSTR);
 #define                       RegisterEventSource WINELIB_NAME_AW(RegisterEventSource)
@@ -2769,6 +2781,9 @@ WINBASEAPI BOOL        WINAPI WritePrivateProfileStructA(LPCSTR,LPCSTR,LPVOID,UI
 WINBASEAPI BOOL        WINAPI WritePrivateProfileStructW(LPCWSTR,LPCWSTR,LPVOID,UINT,LPCWSTR);
 #define                       WritePrivateProfileStruct WINELIB_NAME_AW(WritePrivateProfileStruct)
 WINBASEAPI BOOL        WINAPI WriteProcessMemory(HANDLE,LPVOID,LPCVOID,SIZE_T,SIZE_T*);
+#ifdef __i386_on_x86_64__
+WINBASEAPI BOOL        WINAPI WriteProcessMemory(HANDLE,void * HOSTPTR,LPCVOID,SIZE_T,SIZE_T*) __attribute__((overloadable)) asm(__ASM_NAME("wine_WriteProcessMemory_HOSTPTR"));
+#endif
 WINBASEAPI BOOL        WINAPI WriteProfileSectionA(LPCSTR,LPCSTR);
 WINBASEAPI BOOL        WINAPI WriteProfileSectionW(LPCWSTR,LPCWSTR);
 #define                       WritePrivateProfileSection WINELIB_NAME_AW(WritePrivateProfileSection)
@@ -2829,9 +2844,26 @@ static inline LPSTR WINAPI lstrcpynA( LPSTR dst, LPCSTR src, INT n )
     return dst;
 }
 
-static inline INT WINAPI lstrlenW( LPCWSTR str )
+#ifdef __i386_on_x86_64__
+static inline char* HOSTPTR WINAPI lstrcpynA( char* HOSTPTR dst, const char* HOSTPTR src, INT n ) __attribute__((overloadable))
 {
-    const WCHAR *s = str;
+    char* HOSTPTR d = dst;
+    const char* HOSTPTR s = src;
+    UINT count = n;
+
+    while ((count > 1) && *s)
+    {
+        count--;
+        *d++ = *s++;
+    }
+    if (count) *d = 0;
+    return dst;
+}
+#endif
+
+static inline INT WINAPI lstrlenW( const WCHAR * HOSTPTR str )
+{
+    const WCHAR * HOSTPTR s = str;
     while (*s) s++;
     return s - str;
 }
@@ -2850,7 +2882,8 @@ static inline LPWSTR WINAPI lstrcpyW( LPWSTR dst, LPCWSTR src )
 
 static inline LPSTR WINAPI lstrcpyA( LPSTR dst, LPCSTR src )
 {
-    return strcpy( dst, src );
+    strcpy( dst, src );
+    return dst;
 }
 
 static inline LPWSTR WINAPI lstrcatW( LPWSTR dst, LPCWSTR src )
@@ -2863,7 +2896,8 @@ static inline LPWSTR WINAPI lstrcatW( LPWSTR dst, LPCWSTR src )
 
 static inline LPSTR WINAPI lstrcatA( LPSTR dst, LPCSTR src )
 {
-    return strcat( dst, src );
+    strcat( dst, src );
+    return dst;
 }
 
 /* strncpy doesn't do what you think, don't use it */
@@ -3033,7 +3067,7 @@ static FORCEINLINE LONGLONG WINAPI InterlockedCompareExchange64( LONGLONG volati
 static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG val )
 {
     LONG ret;
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__i386_on_x86_64__)
     __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
 #else
     do ret = *dest; while (!__sync_bool_compare_and_swap( dest, ret, val ));
@@ -3044,7 +3078,9 @@ static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG va
 static FORCEINLINE PVOID WINAPI InterlockedExchangePointer( PVOID volatile *dest, PVOID val )
 {
     PVOID ret;
-#ifdef __x86_64__
+#if defined(__i386_on_x86_64__)
+    __asm__ __volatile__( "lock; xchgl %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
+#elif defined(__x86_64__)
     __asm__ __volatile__( "lock; xchgq %0,(%1)" : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
 #else
     do ret = *dest; while (!__sync_bool_compare_and_swap( dest, ret, val ));
@@ -3145,5 +3181,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved ) DECLSPEC_H
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINBASE_H */

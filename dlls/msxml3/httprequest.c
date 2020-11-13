@@ -1138,7 +1138,7 @@ static HRESULT httprequest_get_responseText(httprequest *This, BSTR *body)
     hr = GetHGlobalFromStream(This->bsc->stream, &hglobal);
     if (hr == S_OK)
     {
-        xmlChar *ptr = GlobalLock(hglobal);
+        xmlChar * WIN32PTR ptr = GlobalLock(hglobal);
         DWORD size = GlobalSize(hglobal);
         xmlCharEncoding encoding = XML_CHAR_ENCODING_UTF8;
 

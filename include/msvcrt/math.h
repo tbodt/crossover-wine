@@ -9,6 +9,8 @@
 #ifndef __WINE_MATH_H
 #define __WINE_MATH_H
 
+#include "wine/winheader_enter.h"
+
 #include <corecrt.h>
 
 #include <pshpack8.h>
@@ -96,10 +98,10 @@ float __cdecl rintf(float);
 float __cdecl roundf(float);
 float __cdecl truncf(float);
 
-long __cdecl lrint(double);
-long __cdecl lrintf(float);
-long __cdecl lround(double);
-long __cdecl lroundf(float);
+__int3264 __cdecl lrint(double);
+__int3264 __cdecl lrintf(float);
+__int3264 __cdecl lround(double);
+__int3264 __cdecl lroundf(float);
 
 double __cdecl _copysign (double, double);
 double __cdecl _chgsign (double);
@@ -110,7 +112,7 @@ int    __cdecl _finite(double);
 int    __cdecl _isnan(double);
 int    __cdecl _fpclass(double);
 
-#ifndef __i386__
+#if !defined(__i386__) && !defined(__i386_on_x86_64__)
 
 float __cdecl sinf(float);
 float __cdecl cosf(float);
@@ -263,5 +265,7 @@ static inline double y1( double x ) { return _y1( x ); }
 static inline double yn( int n, double x ) { return _yn( n, x ); }
 
 static inline float hypotf( float x, float y ) { return _hypotf( x, y ); }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MATH_H */

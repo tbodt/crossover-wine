@@ -47,8 +47,6 @@ static WCHAR empty[] = {0};
 static const UNICODE_STRING empty_str = { 0, sizeof(empty), empty };
 static const UNICODE_STRING null_str = { 0, 0, NULL };
 
-static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
-
 static const WCHAR windows_dir[] = {'C',':','\\','w','i','n','d','o','w','s',0};
 
 static BOOL first_prefix_start;  /* first ever process start in this prefix? */
@@ -61,10 +59,10 @@ static inline SIZE_T get_env_length( const WCHAR *env )
 }
 
 #ifdef __APPLE__
-extern char **__wine_get_main_environment(void);
+extern char * HOSTPTR * HOSTPTR __wine_get_main_environment(void);
 #else
-extern char **__wine_main_environ;
-static char **__wine_get_main_environment(void) { return __wine_main_environ; }
+extern char * HOSTPTR * HOSTPTR __wine_main_environ;
+static char * HOSTPTR * HOSTPTR __wine_get_main_environment(void) { return __wine_main_environ; }
 #endif
 
 
@@ -74,7 +72,7 @@ static char **__wine_get_main_environment(void) { return __wine_main_environ; }
  * Check if an environment variable needs to be handled specially when
  * passed through the Unix environment (i.e. prefixed with "WINE").
  */
-static inline BOOL is_special_env_var( const char *var )
+static inline BOOL is_special_env_var( const char * HOSTPTR var )
 {
     return (!strncmp( var, "PATH=", sizeof("PATH=")-1 ) ||
             !strncmp( var, "PWD=", sizeof("PWD=")-1 ) ||
@@ -330,8 +328,19 @@ static void set_additional_environment( WCHAR **env )
 }
 
 
+#ifdef __i386_on_x86_64__
+static char * nt_strdup(const char * HOSTPTR str)
+{
+    size_t len = strlen(str) + 1;
+    char * copy = RtlAllocateHeap(GetProcessHeap(), 0, len);
+    if (!copy) return NULL;
+    memcpy(copy, str, len);
+    return copy;
+}
+#endif
+
 /* set an environment variable for one of the wine path variables */
-static void set_wine_path_variable( WCHAR **env, const WCHAR *name, const char *unix_path )
+static void set_wine_path_variable( WCHAR **env, const WCHAR *name, const char * HOSTPTR unix_path )
 {
     UNICODE_STRING nt_name, var_name;
     ANSI_STRING unix_name;
@@ -339,10 +348,18 @@ static void set_wine_path_variable( WCHAR **env, const WCHAR *name, const char *
     RtlInitUnicodeString( &var_name, name );
     if (unix_path)
     {
+#ifdef __i386_on_x86_64__
+        char *path_copy = nt_strdup( unix_path );
+        RtlInitAnsiString( &unix_name, path_copy );
+#else
         RtlInitAnsiString( &unix_name, unix_path );
+#endif
         if (wine_unix_to_nt_file_name( &unix_name, &nt_name )) return;
         RtlSetEnvironmentVariable( env, &var_name, &nt_name );
         RtlFreeUnicodeString( &nt_name );
+#ifdef __i386_on_x86_64__
+        RtlFreeHeap( GetProcessHeap(), 0, path_copy );
+#endif
     }
     else RtlSetEnvironmentVariable( env, &var_name, NULL );
 }
@@ -386,7 +403,7 @@ static void set_wow64_environment( WCHAR **env )
     UNICODE_STRING valW = { 0, sizeof(buf), buf };
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
-    const char *path;
+    const char * HOSTPTR path;
     WCHAR *val;
     HANDLE hkey;
     DWORD i;
@@ -409,7 +426,7 @@ static void set_wow64_environment( WCHAR **env )
 
     if (!RtlQueryEnvironmentVariable_U( *env, &arch6432_strW, &valW ))
     {
-        if (is_win64)
+        if (wine_is_64bit())
         {
             RtlSetEnvironmentVariable( env, &arch_strW, &valW );
             RtlSetEnvironmentVariable( env, &arch6432_strW, NULL );
@@ -433,13 +450,13 @@ static void set_wow64_environment( WCHAR **env )
 
     if ((val = get_registry_value( *env, hkey, progdirW )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, progw6432W, val );
-        if (is_win64 || !is_wow64) set_env_var( env, progfilesW, val );
+        if (wine_is_64bit() || is_wow64) set_env_var( env, progw6432W, val );
+        if (wine_is_64bit() || !is_wow64) set_env_var( env, progfilesW, val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
     if ((val = get_registry_value( *env, hkey, progdir86W )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, progfiles86W, val );
+        if (wine_is_64bit() || is_wow64) set_env_var( env, progfiles86W, val );
         if (is_wow64) set_env_var( env, progfilesW, val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
@@ -448,13 +465,13 @@ static void set_wow64_environment( WCHAR **env )
 
     if ((val = get_registry_value( *env, hkey, commondirW )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, commonw6432W, val );
-        if (is_win64 || !is_wow64) set_env_var( env, commonfilesW, val );
+        if (wine_is_64bit() || is_wow64) set_env_var( env, commonw6432W, val );
+        if (wine_is_64bit() || !is_wow64) set_env_var( env, commonfilesW, val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
     if ((val = get_registry_value( *env, hkey, commondir86W )))
     {
-        if (is_win64 || is_wow64) set_env_var( env, commonfiles86W, val );
+        if (wine_is_64bit() || is_wow64) set_env_var( env, commonfiles86W, val );
         if (is_wow64) set_env_var( env, commonfilesW, val );
         RtlFreeHeap( GetProcessHeap(), 0, val );
     }
@@ -467,10 +484,10 @@ static void set_wow64_environment( WCHAR **env )
  *
  * Build the Win32 environment from the Unix environment
  */
-static WCHAR *build_initial_environment( char **env )
+static WCHAR *build_initial_environment( char * HOSTPTR * HOSTPTR env )
 {
     SIZE_T size = 1;
-    char **e;
+    char * HOSTPTR * HOSTPTR e;
     WCHAR *p, *ptr;
 
     /* compute the total size of the Unix environment */
@@ -488,7 +505,7 @@ static WCHAR *build_initial_environment( char **env )
 
     for (e = env; *e; e++)
     {
-        char *str = *e;
+        char * HOSTPTR str = *e;
 
         /* skip Unix special variables and use the Wine variants instead */
         if (!strncmp( str, "WINE", 4 ))
@@ -513,11 +530,11 @@ static WCHAR *build_initial_environment( char **env )
  *
  * Build the environment of a new child process.
  */
-char **build_envp( const WCHAR *envW )
+char * HOSTPTR *build_envp( const WCHAR *envW )
 {
     static const char * const unix_vars[] = { "PATH", "TEMP", "TMP", "HOME" };
-    char **envp;
-    char *env, *p;
+    char * HOSTPTR *envp;
+    char *env, * HOSTPTR p;
     int count = 1, length, lenW;
     unsigned int i;
 
@@ -538,7 +555,7 @@ char **build_envp( const WCHAR *envW )
 
     if ((envp = RtlAllocateHeap( GetProcessHeap(), 0, count * sizeof(*envp) + length )))
     {
-        char **envptr = envp;
+        char * HOSTPTR *envptr = envp;
         char *dst = (char *)(envp + count);
 
         /* some variables must not be modified, so we get them directly from the unix env */
@@ -583,7 +600,7 @@ char **build_envp( const WCHAR *envW )
  */
 static void get_current_directory( UNICODE_STRING *dir )
 {
-    const char *pwd;
+    const char * HOSTPTR pwd;
     char *cwd;
     int size;
 
@@ -617,8 +634,13 @@ static void get_current_directory( UNICODE_STRING *dir )
     {
         ANSI_STRING unix_name;
         UNICODE_STRING nt_name;
+#ifdef __i386_on_x86_64__
+        char *pwd_copy = nt_strdup( pwd );
 
+        RtlInitAnsiString( &unix_name, pwd_copy );
+#else
         RtlInitAnsiString( &unix_name, pwd );
+#endif
         if (!wine_unix_to_nt_file_name( &unix_name, &nt_name ))
         {
             /* skip the \??\ prefix */
@@ -635,6 +657,9 @@ static void get_current_directory( UNICODE_STRING *dir )
             }
             RtlFreeUnicodeString( &nt_name );
         }
+#ifdef __i386_on_x86_64__
+        RtlFreeHeap( GetProcessHeap(), 0, pwd_copy );
+#endif
     }
 
     if (!dir->Length)  /* still not initialized */
@@ -672,7 +697,7 @@ static inline BOOL is_path_prefix( const WCHAR *prefix, const WCHAR *path, const
 /***********************************************************************
  *           get_image_path
  */
-static void get_image_path( const char *argv0, UNICODE_STRING *path )
+static void get_image_path( const char * HOSTPTR argv0, UNICODE_STRING *path )
 {
     static const WCHAR exeW[] = {'.','e','x','e',0};
     WCHAR *load_path, *file_part, *name, full_name[MAX_PATH];
@@ -697,7 +722,7 @@ static void get_image_path( const char *argv0, UNICODE_STRING *path )
         /* check for builtin path inside system directory */
         if (!is_path_prefix( system_dir, full_name, file_part ))
         {
-            if (!is_win64 && !is_wow64) goto failed;
+            if (!wine_is_64bit() && !is_wow64) goto failed;
             if (!is_path_prefix( syswow64_dir, full_name, file_part )) goto failed;
         }
     }
@@ -732,7 +757,7 @@ failed:
  *
  * Set the Wine library Unicode argv global variables.
  */
-static void set_library_wargv( char **argv, const UNICODE_STRING *image )
+static void set_library_wargv( char * HOSTPTR * HOSTPTR argv, const UNICODE_STRING *image )
 {
     int argc;
     WCHAR *p, **wargv;

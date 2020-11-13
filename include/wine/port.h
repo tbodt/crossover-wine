@@ -42,6 +42,8 @@
 # include <unistd.h>
 #endif
 
+#include <wine/hostaddrspace_enter.h>
+
 
 /****************************************************************
  * Hard-coded values for the Windows platform
@@ -91,7 +93,7 @@ typedef int ssize_t;
 #else  /* _WIN32 */
 
 #ifndef __int64
-#  if defined(__x86_64__) || defined(__aarch64__) || defined(_WIN64)
+#  if defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__aarch64__) || defined(_WIN64)
 #    define __int64 long
 #  else
 #    define __int64 long long
@@ -349,7 +351,7 @@ extern int mkstemps(char *template, int suffix_len);
 
 /* Interlocked functions */
 
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
 
 static inline int interlocked_cmpxchg( int *dest, int xchg, int compare )
 {
@@ -362,7 +364,7 @@ static inline int interlocked_cmpxchg( int *dest, int xchg, int compare )
 static inline void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare )
 {
     void *ret;
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__i386_on_x86_64__)
     __asm__ __volatile__( "lock; cmpxchgq %2,(%1)"
                           : "=a" (ret) : "r" (dest), "r" (xchg), "0" (compare) : "memory" );
 #else
@@ -371,6 +373,17 @@ static inline void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *comp
 #endif
     return ret;
 }
+
+#ifdef __i386_on_x86_64__
+static inline void * __ptr32 interlocked_cmpxchg_ptr( void * __ptr32 *dest, void * __ptr32 xchg,
+                                                      void * __ptr32 compare ) __attribute__((overloadable))
+{
+    void * __ptr32 ret;
+    __asm__ __volatile__( "lock; cmpxchgl %2,(%1)"
+                          : "=a" (ret) : "r" (dest), "r" (xchg), "0" (compare) : "memory" );
+    return ret;
+}
+#endif
 
 static inline int interlocked_xchg( int *dest, int val )
 {
@@ -383,7 +396,7 @@ static inline int interlocked_xchg( int *dest, int val )
 static inline void *interlocked_xchg_ptr( void **dest, void *val )
 {
     void *ret;
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__i386_on_x86_64__)
     __asm__ __volatile__( "lock; xchgq %0,(%1)"
                           : "=r" (ret) :"r" (dest), "0" (val) : "memory" );
 #else
@@ -393,6 +406,17 @@ static inline void *interlocked_xchg_ptr( void **dest, void *val )
     return ret;
 }
 
+#ifdef __i386_on_x86_64__
+static inline void * __ptr32 interlocked_xchg_ptr( void * __ptr32 *dest,
+                                                   void * __ptr32 val ) __attribute__((overloadable))
+{
+    void * __ptr32 ret;
+    __asm__ __volatile__( "lock; xchgl %0,(%1)"
+                          : "=r" (ret) : "r" (dest), "0" (val) : "memory" );
+    return ret;
+}
+#endif
+
 static inline int interlocked_xchg_add( int *dest, int incr )
 {
     int ret;
@@ -401,7 +425,7 @@ static inline int interlocked_xchg_add( int *dest, int incr )
     return ret;
 }
 
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__i386_on_x86_64__)
 static inline unsigned char interlocked_cmpxchg128( __int64 *dest, __int64 xchg_high,
                                                     __int64 xchg_low, __int64 *compare )
 {
@@ -495,5 +519,7 @@ extern __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int64 compa
 #define usleep                  __WINE_NOT_PORTABLE(usleep)
 
 #endif /* NO_LIBWINE_PORT */
+
+#include <wine/hostaddrspace_exit.h>
 
 #endif /* !defined(__WINE_WINE_PORT_H) */

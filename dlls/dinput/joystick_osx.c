@@ -28,6 +28,7 @@
 #define LPDWORD UInt32*
 #define LONG SInt32
 #define LPLONG SInt32*
+#define LPVOID __carbon_LPVOID
 #define E_PENDING __carbon_E_PENDING
 #define ULONG __carbon_ULONG
 #define E_INVALIDARG __carbon_E_INVALIDARG
@@ -76,6 +77,7 @@
 #undef LPDWORD
 #undef LONG
 #undef LPLONG
+#undef LPVOID
 #undef E_PENDING
 #endif /* HAVE_IOKIT_HID_IOHIDLIB_H */
 
@@ -236,7 +238,7 @@ static long get_device_location_ID(IOHIDDeviceRef device)
     return get_device_property_long(device, CFSTR(kIOHIDLocationIDKey));
 }
 
-static void copy_set_to_array(const void *value, void *context)
+static void copy_set_to_array(const void * HOSTPTR value, void * HOSTPTR context)
 {
     CFArrayAppendValue(context, value);
 }
@@ -250,7 +252,7 @@ static CFComparisonResult device_name_comparator(IOHIDDeviceRef device1, IOHIDDe
     return  result;
 }
 
-static CFComparisonResult device_location_name_comparator(const void *val1, const void *val2, void *context)
+static CFComparisonResult device_location_name_comparator(const void * HOSTPTR val1, const void * HOSTPTR val2, void * HOSTPTR context)
 {
     IOHIDDeviceRef device1 = (IOHIDDeviceRef)val1, device2 = (IOHIDDeviceRef)val2;
     long loc1 = get_device_location_ID(device1), loc2 = get_device_location_ID(device2);
@@ -263,10 +265,10 @@ static CFComparisonResult device_location_name_comparator(const void *val1, cons
     return device_name_comparator(device1, device2);
 }
 
-static const char* debugstr_cf(CFTypeRef t)
+static const char* HOSTPTR debugstr_cf(CFTypeRef t)
 {
     CFStringRef s;
-    const char* ret;
+    const char* HOSTPTR ret;
 
     if (!t) return "(null)";
 
@@ -280,7 +282,7 @@ static const char* debugstr_cf(CFTypeRef t)
     {
         const UniChar* u = CFStringGetCharactersPtr(s);
         if (u)
-            ret = debugstr_wn((const WCHAR*)u, CFStringGetLength(s));
+            ret = debugstr_wn((const WCHAR* HOSTPTR)u, CFStringGetLength(s));
     }
     if (!ret)
     {
@@ -293,14 +295,14 @@ static const char* debugstr_cf(CFTypeRef t)
     return ret;
 }
 
-static const char* debugstr_device(IOHIDDeviceRef device)
+static const char* HOSTPTR debugstr_device(IOHIDDeviceRef device)
 {
     return wine_dbg_sprintf("<IOHIDDevice %p product %s IOHIDLocationID %lu>", device,
                             debugstr_cf(IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey))),
                             get_device_location_ID(device));
 }
 
-static const char* debugstr_element(IOHIDElementRef element)
+static const char* HOSTPTR debugstr_element(IOHIDElementRef element)
 {
     return wine_dbg_sprintf("<IOHIDElement %p type %d usage %u/%u device %p>", element,
                             IOHIDElementGetType(element), IOHIDElementGetUsagePage(element),
@@ -602,7 +604,7 @@ static int get_osx_device_name(int id, char *name, int length)
     return 0;
 }
 
-static CFComparisonResult button_usage_comparator(const void *val1, const void *val2, void *context)
+static CFComparisonResult button_usage_comparator(const void * HOSTPTR val1, const void * HOSTPTR val2, void * HOSTPTR context)
 {
     IOHIDElementRef element1 = (IOHIDElementRef)val1, element2 = (IOHIDElementRef)val2;
     int usage1 = IOHIDElementGetUsage(element1), usage2 = IOHIDElementGetUsage(element2);

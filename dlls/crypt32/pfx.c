@@ -39,6 +39,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 #ifdef SONAME_LIBGNUTLS
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+#include "wine/hostptraddrspace_enter.h"
+
 /* Not present in gnutls version < 3.0 */
 int gnutls_pkcs12_simple_parse(gnutls_pkcs12_t p12, const char *password,
     gnutls_x509_privkey_t *key, gnutls_x509_crt_t **chain, unsigned int *chain_len,
@@ -47,7 +49,7 @@ int gnutls_pkcs12_simple_parse(gnutls_pkcs12_t p12, const char *password,
 
 int gnutls_x509_privkey_get_pk_algorithm2(gnutls_x509_privkey_t, unsigned int*);
 
-static void *libgnutls_handle;
+static void * HOSTPTR libgnutls_handle;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_global_deinit);
 MAKE_FUNCPTR(gnutls_global_init);
@@ -68,11 +70,27 @@ static void gnutls_log( int level, const char *msg )
     TRACE( "<%d> %s", level, msg );
 }
 
+#include "wine/hostptraddrspace_exit.h"
+
 BOOL gnutls_initialize(void)
 {
     int ret;
 
-    if (!(libgnutls_handle = wine_dlopen( SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0 )))
+if (1) { /* CROSSOVER HACK - bug 10151 */
+    const char *libgnutls_name_candidates[] = {SONAME_LIBGNUTLS,
+                                               "libgnutls.so.30",
+                                               "libgnutls.so.28",
+                                               "libgnutls-deb0.so.28",
+                                               "libgnutls.so.26",
+                                               NULL};
+    int i;
+    for (i=0; libgnutls_name_candidates[i] && !libgnutls_handle; i++)
+        libgnutls_handle = wine_dlopen(libgnutls_name_candidates[i], RTLD_NOW, NULL, 0);
+}
+else
+    libgnutls_handle = wine_dlopen( SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0 );
+
+    if (!libgnutls_handle)
     {
         ERR_(winediag)( "failed to load libgnutls, no support for pfx import/export\n" );
         return FALSE;
@@ -138,7 +156,7 @@ static HCRYPTPROV import_key( gnutls_x509_privkey_t key, DWORD flags )
     RSAPUBKEY *rsakey;
     HCRYPTPROV prov = 0;
     HCRYPTKEY cryptkey;
-    BYTE *buf, *src, *dst;
+    BYTE *buf, * HOSTPTR src, *dst;
     DWORD size;
 
     if ((ret = pgnutls_x509_privkey_get_pk_algorithm2( key, &bitlen )) < 0)

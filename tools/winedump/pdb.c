@@ -556,7 +556,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader, PDB_STREAM_INDEXES* sidx
         }
 
         file_name += strlen(file_name) + 1;
-        file = (char*)((DWORD_PTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
+        file = (char*)((ULONG_HOSTPTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
     }
     free(symbols);
     free(filesimage);

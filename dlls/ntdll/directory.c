@@ -248,7 +248,7 @@ static inline BOOL is_valid_mounted_device( const struct stat *st )
 #endif
 }
 
-static inline void ignore_file( const char *name )
+static inline void ignore_file( const char * HOSTPTR name )
 {
     struct stat st;
     assert( ignored_files_count < MAX_IGNORED_FILES );
@@ -333,7 +333,7 @@ static void *get_dir_data_space( struct dir_data *data, unsigned int size )
 }
 
 /* add a string to the directory data buffer */
-static const char *add_dir_data_nameA( struct dir_data *data, const char *name )
+static const char *add_dir_data_nameA( struct dir_data *data, const char * HOSTPTR name )
 {
     /* keep buffer data WCHAR-aligned */
     char *ptr = get_dir_data_space( data, (strlen( name ) + sizeof(WCHAR)) & ~(sizeof(WCHAR) - 1) );
@@ -351,7 +351,7 @@ static const WCHAR *add_dir_data_nameW( struct dir_data *data, const WCHAR *name
 
 /* add an entry to the directory names array */
 static BOOL add_dir_data_names( struct dir_data *data, const WCHAR *long_name,
-                                const WCHAR *short_name, const char *unix_name )
+                                const WCHAR *short_name, const char * HOSTPTR unix_name )
 {
     static const WCHAR empty[1];
     struct dir_data_names *names = data->names;
@@ -547,6 +547,152 @@ static struct mntent *getmntent_replacement( FILE *f )
 #endif
 
 /***********************************************************************
+ *           get_autofs_mount_points
+ *
+ * Return a list of autofs mount points.
+ */
+static struct drive_info *get_autofs_mount_points( unsigned int *ret_count )
+{
+    struct drive_info *ret = NULL;
+
+#ifdef linux
+    unsigned int count, total;
+    struct mntent *entry;
+    struct stat st;
+    FILE *f;
+
+    if (!(f = fopen( "/etc/mtab", "r" ))) return NULL;
+    count = total = 0;
+    while ((entry = getmntent( f )))
+    {
+        if (strcmp( entry->mnt_type, "autofs" )) continue;
+        if (stat( entry->mnt_dir, &st ) == -1) continue;
+        if (count >= total)
+        {
+            total += 16;
+            if (!ret) ret = RtlAllocateHeap( GetProcessHeap(), 0, total * sizeof(*ret) );
+            else
+            {
+                void *new = RtlReAllocateHeap( GetProcessHeap(), 0, ret, total * sizeof(*ret) );
+                if (!new) RtlFreeHeap( GetProcessHeap(), 0, ret );
+                ret = new;
+            }
+            if (!ret) break;
+        }
+        ret[count].dev = st.st_dev;
+        ret[count].ino = st.st_ino;
+        count++;
+    }
+    *ret_count = count;
+    fclose( f );
+#endif
+    return ret;
+}
+
+
+/***********************************************************************
+ *           read_drive_symlink
+ *
+ * Read the symlink for a given drive and return the resulting full path.
+ */
+static char *read_drive_symlink( char *dos_device, unsigned int *prefix )
+{
+    char *buffer, *p;
+    int ret, size = 128;
+
+    if (!(p = strrchr( dos_device, '/' ))) p = dos_device;
+    else p++;
+
+    for (;;)
+    {
+        if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size + (p - dos_device) )))
+        {
+            errno = ENOMEM;
+            return NULL;
+        }
+        ret = readlink( dos_device, buffer, size );
+        if (ret == -1)
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, buffer );
+            return NULL;
+        }
+        if (ret != size)
+        {
+            buffer[ret] = 0;
+            break;
+        }
+        RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        size *= 2;
+    }
+    if (buffer[0] != '/')
+    {
+        memmove( buffer + (p - dos_device), buffer, strlen(buffer) + 1 );
+        memcpy( buffer, dos_device, p - dos_device );
+        *prefix = p - dos_device;
+    }
+    else *prefix = 0;
+    return buffer;
+}
+
+
+/***********************************************************************
+ *           is_drive_automounted
+ *
+ * Check if any element of the specified dosdevice is inside an autofs
+ * mount point and isn't currently mounted.
+ */
+static int is_drive_automounted( char *dos_device, struct drive_info *mount_points, unsigned int count )
+{
+    struct stat st;
+    unsigned int i, start;
+    char *symlink, *next, *p;
+
+    if (!(symlink = read_drive_symlink( dos_device, &start ))) return -1;
+
+    p = symlink + start;
+    while (*p == '/') p++;  /* skip leading slashes */
+    for (;;)
+    {
+        while (*p && *p != '/') p++;
+        next = p;
+        while (*next == '/') next++;
+        if (!*next) break;  /* don't stat the last element */
+        *p = 0;
+        if (stat( symlink, &st ) != -1)
+        {
+            for (i = 0; i < count; i++)
+                if (mount_points[i].dev == st.st_dev && mount_points[i].ino == st.st_ino) break;
+            if (i < count)
+            {
+                /* now check if the next path element exists, without triggering a mount */
+                struct dirent *de;
+                DIR *dir = opendir( symlink );
+                if (!dir) break;
+                while ((de = readdir( dir )))
+                {
+                    unsigned int len = strlen(de->d_name);
+                    if (!strncmp( de->d_name, next, len ) && (!next[len] || next[len] == '/'))
+                        break;
+                }
+                closedir( dir );
+                if (!de)  /* not found in the dir -> automounted */
+                {
+                    TRACE( "%s is automounted under %s\n", dos_device, symlink );
+                    RtlFreeHeap( GetProcessHeap(), 0, symlink );
+                    return 1;
+                }
+                TRACE( "%s found in %s -> already mounted\n", next, symlink );
+            }
+        }
+        *p = '/';
+        p = next;
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, symlink );
+    return 0;
+}
+
+
+/***********************************************************************
  *           DIR_get_drives_info
  *
  * Retrieve device/inode number for all the drives. Helper for find_drive_root.
@@ -562,10 +708,12 @@ unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] )
     RtlEnterCriticalSection( &dir_section );
     if (now != last_update)
     {
-        const char *config_dir = wine_get_config_dir();
+        const char * HOSTPTR config_dir = wine_get_config_dir();
         char *buffer, *p;
         struct stat st;
         unsigned int i;
+        unsigned int count = 0;
+        struct drive_info *mount_points;
 
         if ((buffer = RtlAllocateHeap( GetProcessHeap(), 0,
                                        strlen(config_dir) + sizeof("/dosdevices/a:") )))
@@ -574,21 +722,27 @@ unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] )
             strcat( buffer, "/dosdevices/a:" );
             p = buffer + strlen(buffer) - 2;
 
+            mount_points = get_autofs_mount_points( &count );
+
             for (i = nb_drives = 0; i < MAX_DOS_DRIVES; i++)
             {
+                cache[i].dev = 0;
+                cache[i].ino = 0;
                 *p = 'a' + i;
+                /* skip the stat for automounted drives to avoid triggering a mount */
+                if (mount_points)
+                {
+                    int res = is_drive_automounted( buffer, mount_points, count );
+                    if (res > 0 || (res == -1 && errno == ENOENT)) continue;
+                }
                 if (!stat( buffer, &st ))
                 {
                     cache[i].dev = st.st_dev;
                     cache[i].ino = st.st_ino;
                     nb_drives++;
                 }
-                else
-                {
-                    cache[i].dev = 0;
-                    cache[i].ino = 0;
-                }
             }
+            RtlFreeHeap( GetProcessHeap(), 0, mount_points );
             RtlFreeHeap( GetProcessHeap(), 0, buffer );
         }
         last_update = now;
@@ -1285,6 +1439,13 @@ BOOL DIR_is_hidden_file( const UNICODE_STRING *name )
     end = p = name->Buffer + name->Length/sizeof(WCHAR);
     while (p > name->Buffer && IS_SEPARATOR(p[-1])) p--;
     while (p > name->Buffer && !IS_SEPARATOR(p[-1])) p--;
+
+    if (p != end && p+1 != end && p[0] == '~' && p[1] == '$')
+    {
+        /* CrossOver Hack for bug 15207 - hide files starting in ~$ */
+        return TRUE;
+    }
+
     if (p == end || *p != '.') return FALSE;
     /* make sure it isn't '.' or '..' */
     if (p + 1 == end) return FALSE;
@@ -1306,29 +1467,49 @@ static ULONG hash_short_file_name( const UNICODE_STRING *name, LPWSTR buffer )
 {
     static const char hash_chars[32] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
 
-    LPCWSTR p, ext, end = name->Buffer + name->Length / sizeof(WCHAR);
+    LPCWSTR p, ext, hash_end, end = name->Buffer + name->Length / sizeof(WCHAR);
     LPWSTR dst;
     unsigned short hash;
     int i;
+
+    /* Find last dot for start of the extension */
+    for (p = name->Buffer + 1, ext = NULL; p < end - 1; p++) if (*p == '.') ext = p;
+
+    /* don't include the standard 3 char .ext in the filename hash */
+    hash_end = end;
+    if (ext && ((end - ext) == 4 ))
+    {
+        /*
+         * FIXME: CodeWeavers hack alert
+         * The next five lines are a nasty hack to only activate this
+         * (more correct behaviour) for Quicken files for the moment.
+         * We don't want to break our install base of programs that have
+         * shortfile names stored in the registry or elsewhere.
+         */
+        WCHAR szqdf[]={'.','q','d','f'};
+        WCHAR szqsd[]={'.','q','s','d'};
+        WCHAR szqel[]={'.','q','e','l'};
+        WCHAR szqph[]={'.','q','p','h'};
+        if (!strncmpiW(ext,szqdf,4) || !strncmpiW(ext,szqsd,4) ||
+            !strncmpiW(ext,szqph,4) || !strncmpiW(ext,szqel,4))
+            hash_end = ext;
+    }
 
     /* Compute the hash code of the file name */
     /* If you know something about hash functions, feel free to */
     /* insert a better algorithm here... */
     if (!is_case_sensitive)
     {
-        for (p = name->Buffer, hash = 0xbeef; p < end - 1; p++)
+        for (p = name->Buffer, hash = 0xbeef; p < hash_end - 1; p++)
             hash = (hash<<3) ^ (hash>>5) ^ tolowerW(*p) ^ (tolowerW(p[1]) << 8);
         hash = (hash<<3) ^ (hash>>5) ^ tolowerW(*p); /* Last character */
     }
     else
     {
-        for (p = name->Buffer, hash = 0xbeef; p < end - 1; p++)
+        for (p = name->Buffer, hash = 0xbeef; p < hash_end - 1; p++)
             hash = (hash << 3) ^ (hash >> 5) ^ *p ^ (p[1] << 8);
         hash = (hash << 3) ^ (hash >> 5) ^ *p;  /* Last character */
     }
-
-    /* Find last dot for start of the extension */
-    for (p = name->Buffer + 1, ext = NULL; p < end - 1; p++) if (*p == '.') ext = p;
 
     /* Copy first 4 chars, replacing invalid chars with '_' */
     for (i = 4, p = name->Buffer, dst = buffer; i > 0; i--, p++)
@@ -1443,8 +1624,8 @@ static BOOLEAN match_filename( const UNICODE_STRING *name_str, const UNICODE_STR
  *
  * Add a file to the directory data if it matches the mask.
  */
-static BOOL append_entry( struct dir_data *data, const char *long_name,
-                          const char *short_name, const UNICODE_STRING *mask )
+static BOOL append_entry( struct dir_data *data, const char * HOSTPTR long_name,
+                          const char * HOSTPTR short_name, const UNICODE_STRING *mask )
 {
     int i, long_len, short_len;
     WCHAR long_nameW[MAX_DIR_ENTRY_LEN + 1];
@@ -1536,6 +1717,10 @@ static NTSTATUS get_dir_data_entry( struct dir_data *dir_data, void *info_ptr, I
 
         if (!show_dot_files && names->long_name[0] == '.' && names->long_name[1] &&
             (names->long_name[1] != '.' || names->long_name[2]))
+            attributes |= FILE_ATTRIBUTE_HIDDEN;
+
+        /* CrossOver Hack for bug 15207 - hide files starting in ~$ */
+        if (!show_dot_files && names->long_name[0] == '~' && names->long_name[1] == '$')
             attributes |= FILE_ATTRIBUTE_HIDDEN;
 
         fill_file_info( &st, attributes, info, class );
@@ -1815,10 +2000,10 @@ static NTSTATUS read_directory_data( struct dir_data *data, int fd, const UNICOD
 
 
 /* compare file names for directory sorting */
-static int name_compare( const void *a, const void *b )
+static int name_compare( const void * HOSTPTR a, const void * HOSTPTR b )
 {
-    const struct dir_data_names *file_a = (const struct dir_data_names *)a;
-    const struct dir_data_names *file_b = (const struct dir_data_names *)b;
+    const struct dir_data_names * HOSTPTR file_a = (const struct dir_data_names * HOSTPTR)a;
+    const struct dir_data_names * HOSTPTR file_b = (const struct dir_data_names * HOSTPTR)b;
     int ret = RtlCompareUnicodeStrings( file_a->long_name, strlenW(file_a->long_name),
                                         file_b->long_name, strlenW(file_b->long_name), TRUE );
     if (!ret) ret = strcmpW( file_a->long_name, file_b->long_name );
@@ -2224,7 +2409,7 @@ static unsigned int nb_redirects;
 static void init_redirects(void)
 {
     static const char windows_dir[] = "/dosdevices/c:/windows";
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     char *dir;
     struct stat st;
 
@@ -2332,7 +2517,7 @@ void init_directories(void)
  */
 static NTSTATUS get_dos_device( const WCHAR *name, UINT name_len, ANSI_STRING *unix_name_ret )
 {
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     struct stat st;
     char *unix_name, *new_name, *dev;
     unsigned int i;
@@ -2761,7 +2946,7 @@ NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRI
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
 
     NTSTATUS status = STATUS_SUCCESS;
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     const WCHAR *name, *p;
     struct stat st;
     char *unix_name;
@@ -2899,6 +3084,7 @@ NTSTATUS WINAPI RtlWow64EnableFsRedirectionEx( ULONG disable, ULONG *old_value )
     return STATUS_SUCCESS;
 }
 
+NTSTATUS WINAPI __syscall_NtQueryAttributesFile( const OBJECT_ATTRIBUTES *attr, FILE_BASIC_INFORMATION *info );
 
 /******************************************************************
  *		RtlDoesFileExists_U   (NTDLL.@)
@@ -2919,7 +3105,7 @@ BOOLEAN WINAPI RtlDoesFileExists_U(LPCWSTR file_name)
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    ret = NtQueryAttributesFile(&attr, &basic_info) == STATUS_SUCCESS;
+    ret = SYSCALL(NtQueryAttributesFile)(&attr, &basic_info) == STATUS_SUCCESS;
 
     RtlFreeUnicodeString( &nt_name );
     return ret;

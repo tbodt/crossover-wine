@@ -100,7 +100,15 @@ void THEMING_Initialize (void)
     static const WCHAR refDataPropName[] = 
         { 'C','C','3','2','T','h','e','m','i','n','g','D','a','t','a',0 };
 
-    if (!IsThemeActive()) return;
+    /* CrossOver only HACK - Theming subclassing is disabled
+     * It confuses Delphi programs (such as the DVD Pro installer) and is
+     * generally bad because it removes the A/W duality of the builtin USER
+     * classes like edit controls and list boxes. These probably need to depend
+     * on a manifest resource being present in the executable or maybe need to
+     * use hooks into user32 instead.
+     */
+
+    if (1 || !IsThemeActive()) return;
 
     atSubclassProp = GlobalAddAtomW (subclassPropName);
     atRefDataProp = GlobalAddAtomW (refDataPropName);

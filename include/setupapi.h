@@ -20,6 +20,8 @@
 #ifndef _INC_SETUPAPI
 #define _INC_SETUPAPI
 
+#include "wine/winheader_enter.h"
+
 #include <commctrl.h>
 #include <devpropdef.h>
 
@@ -1867,5 +1869,7 @@ BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
 #undef DECL_WINELIB_SETUPAPI_TYPE_AW
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* _INC_SETUPAPI */

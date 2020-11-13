@@ -44,7 +44,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(advapi);
         return FailureCode; \
 }
 
-static LPCSTR debugstr_us( const UNICODE_STRING *us )
+static const char* HOSTPTR debugstr_us( const UNICODE_STRING *us )
 {
     if (!us) return "(null)";
     return debugstr_wn(us->Buffer, us->Length / sizeof(WCHAR));

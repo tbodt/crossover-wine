@@ -27,7 +27,7 @@
 
 int __wine_main_argc = 0;
 char **__wine_main_argv = NULL;
-WCHAR **__wine_main_wargv = NULL;
+WCHAR * WIN32PTR * WIN32PTR __wine_main_wargv = NULL;
 
 const char *wine_get_config_dir(void)
 {

@@ -5054,7 +5054,7 @@ void write_exceptions( FILE *file )
     fprintf( file, "    __DECL_EXCEPTION_FRAME\n");
     fprintf( file, "};\n");
     fprintf( file, "\n");
-    fprintf( file, "static inline void __widl_unwind_target(void)\n" );
+    fprintf( file, "static inline void __cdecl __widl_unwind_target(void)\n" );
     fprintf( file, "{\n");
     fprintf( file, "    struct __exception_frame *exc_frame = (struct __exception_frame *)__wine_get_frame();\n" );
     fprintf( file, "    if (exc_frame->finally_level > exc_frame->filter_level)\n" );

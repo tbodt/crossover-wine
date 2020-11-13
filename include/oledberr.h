@@ -21,6 +21,8 @@
 #ifndef __WINE_OLEDBERR_H
 #define __WINE_OLEDBERR_H
 
+#include "wine/winheader_enter.h"
+
 #define DB_E_BADACCESSORHANDLE              0x80040e00
 #define DB_E_ROWLIMITEXCEEDED               0x80040e01
 #define DB_E_READONLYACCESSOR               0x80040e02
@@ -84,5 +86,7 @@
 #define DB_E_MISMATCHEDPROVIDER             0x80040e75
 
 #define DB_S_ERRORSOCCURRED                 0x00040eda
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_OLEDBERR_H */

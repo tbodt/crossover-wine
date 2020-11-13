@@ -916,7 +916,20 @@ WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
  */
 BOOLEAN WINAPI CreateSymbolicLinkW(LPCWSTR link, LPCWSTR target, DWORD flags)
 {
+    char name[MAX_PATH], *p;
+
     FIXME("(%s %s %d): stub\n", debugstr_w(link), debugstr_w(target), flags);
+
+    /* CXHACK 13427 */
+    GetModuleFileNameA(GetModuleHandleA(NULL), name, sizeof(name));
+    p = strrchr(name, '\\');
+    p = p ? p+1 : name;
+    if(!strcasecmp(p, "OfficeClickToRun.exe"))
+    {
+        FIXME("CXHACK 13427: Using CopyFile\n");
+        return CopyFileW(target, link, FALSE);
+    }
+
     return TRUE;
 }
 

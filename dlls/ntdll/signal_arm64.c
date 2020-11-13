@@ -2118,7 +2118,7 @@ __ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "brk #0; ret")
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-TEB * WINAPI NtCurrentTeb(void)
+TEB * WINAPI NTDLL_NtCurrentTeb(void)
 {
     return pthread_getspecific( teb_key );
 }

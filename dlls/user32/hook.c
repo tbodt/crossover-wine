@@ -186,7 +186,7 @@ static HHOOK set_windows_hook( INT id, HOOKPROC proc, HINSTANCE inst, DWORD tid,
         req->unicode   = unicode;
         if (inst) /* make proc relative to the module base */
         {
-            req->proc = wine_server_client_ptr( (void *)((char *)proc - (char *)inst) );
+            req->proc = wine_server_client_ptr( TRUNCCAST(void *, (char *)proc - (char *)inst) );
             wine_server_add_data( req, module, strlenW(module) * sizeof(WCHAR) );
         }
         else req->proc = wine_server_client_ptr( proc );
@@ -361,11 +361,43 @@ static LRESULT call_hook_proc( HOOKPROC proc, INT id, INT code, WPARAM wparam, L
 void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
 {
     HMODULE mod;
+    static INT isBlocking = -1;
 
     GetModuleHandleExW( 0, module, &mod );
     *free_module = mod;
     if (!mod)
     {
+        /* Codeweavers Hack for Quicken Update */
+        if (isBlocking == -1)
+        {
+            char processName[MAX_PATH];
+            char *p;
+            GetModuleFileNameA(GetModuleHandleA(NULL),processName,MAX_PATH);
+            p = strrchr(processName,'\\');
+            if (p)
+                p++;
+            else
+                p = processName;
+            if (strcasecmp(p,"explorer.exe")==0 || strcasecmp(p,"qwpatch.exe")==0)
+                isBlocking = 1;
+            else
+                isBlocking = 0;
+        }
+
+        if (isBlocking)
+        {
+            LPCWSTR ptr;
+            static const WCHAR szQwMain[] = {'Q','W','M','A','I','N','.','D','L','L',0};
+            static const WCHAR szQwWin[] = {'Q','W','W','I','N','.','D','L','L',0};
+
+            ptr = strrchrW(module,'\\');
+            if (!ptr) ptr = module; else ptr++;
+            if (lstrcmpiW(ptr,szQwMain)==0 || lstrcmpiW(ptr,szQwWin)==0)
+            {
+                TRACE("Blocking Hook for Quicken Update\n");
+                return NULL;
+            }
+        }
         TRACE( "loading %s\n", debugstr_w(module) );
         /* FIXME: the library will never be freed */
         if (!(mod = LoadLibraryExW(module, NULL, LOAD_WITH_ALTERED_SEARCH_PATH))) return NULL;
@@ -382,6 +414,7 @@ void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
 static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARAM lparam )
 {
     DWORD_PTR ret = 0;
+    LRESULT lres;
 
     if (info->tid)
     {
@@ -395,19 +428,23 @@ static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARA
         switch(info->id)
         {
         case WH_KEYBOARD_LL:
-            MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_KEYBOARD_LL_HOOK,
-                                            wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG,
-                                            get_ll_hook_timeout(), &ret );
+            lres = MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_KEYBOARD_LL_HOOK,
+                wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG, get_ll_hook_timeout(), &ret );
             break;
         case WH_MOUSE_LL:
-            MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_MOUSE_LL_HOOK,
-                                            wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG,
-                                            get_ll_hook_timeout(), &ret );
+            lres = MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_MOUSE_LL_HOOK,
+                wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG, get_ll_hook_timeout(), &ret );
             break;
         default:
             ERR("Unknown hook id %d\n", info->id);
             assert(0);
             break;
+        }
+
+        if (!lres && GetLastError() == ERROR_TIMEOUT)
+        {
+            TRACE("Hook %p timed out; removing it.\n", info->handle);
+            UnhookWindowsHookEx( info->handle );
         }
     }
     else if (info->proc)
@@ -743,7 +780,7 @@ HWINEVENTHOOK WINAPI SetWinEventHook(DWORD event_min, DWORD event_max,
         req->unicode   = 1;
         if (inst) /* make proc relative to the module base */
         {
-            req->proc = wine_server_client_ptr( (void *)((char *)proc - (char *)inst) );
+            req->proc = wine_server_client_ptr( TRUNCCAST(void *, (char *)proc - (char *)inst) );
             wine_server_add_data( req, module, strlenW(module) * sizeof(WCHAR) );
         }
         else req->proc = wine_server_client_ptr( proc );

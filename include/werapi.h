@@ -21,6 +21,8 @@
 #ifndef __WINE_WERAPI_H
 #define __WINE_WERAPI_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -192,5 +194,7 @@ HRESULT WINAPI WerUnregisterRuntimeExceptionModule(PCWSTR callbackdll, void *con
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WERAPI_H */

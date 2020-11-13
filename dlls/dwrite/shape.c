@@ -78,10 +78,10 @@ static void shape_update_clusters_from_glyphprop(UINT32 glyphcount, UINT32 text_
     }
 }
 
-static int compare_clustersearch(const void *a, const void* b)
+static int compare_clustersearch(const void * HOSTPTR a, const void* HOSTPTR b)
 {
-    UINT16 target = *(UINT16*)a;
-    UINT16 index = *(UINT16*)b;
+    UINT16 target = *(UINT16* HOSTPTR)a;
+    UINT16 index = *(UINT16* HOSTPTR)b;
     int ret = 0;
 
     if (target > index)
@@ -101,7 +101,7 @@ static int compare_clustersearch(const void *a, const void* b)
  */
 static INT32 map_glyph_to_text_pos(const UINT16 *clustermap, UINT32 len, UINT16 target)
 {
-    UINT16 *ptr;
+    UINT16 * HOSTPTR ptr;
     INT32 k;
 
     ptr = bsearch(&target, clustermap, len, sizeof(UINT16), compare_clustersearch);

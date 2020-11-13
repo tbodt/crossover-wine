@@ -1668,7 +1668,7 @@ static BOOL CRYPT_ExportEncryptedKey(CMSG_CONTENT_ENCRYPT_INFO *info, DWORD i,
     return ret;
 }
 
-static LPVOID WINAPI mem_alloc(size_t size)
+static LPVOID WINAPI mem_alloc(SIZE_T size)
 {
     return HeapAlloc(GetProcessHeap(), 0, size);
 }

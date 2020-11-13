@@ -1816,6 +1816,11 @@ void write_header(const statement_list_t *stmts)
   fprintf(header, "#ifndef __%s__\n", header_token);
   fprintf(header, "#define __%s__\n\n", header_token);
 
+  fprintf(header, "#ifdef __i386_on_x86_64__\n");
+  fprintf(header, "#pragma clang default_addr_space(push, ptr32)\n");
+  fprintf(header, "#pragma clang storage_addr_space(push, ptr32)\n");
+  fprintf(header, "#endif\n");
+
   fprintf(header, "/* Forward declarations */\n\n");
   write_forward_decls(header, stmts);
 
@@ -1837,6 +1842,12 @@ void write_header(const statement_list_t *stmts)
   fprintf(header, "\n");
 
   end_cplusplus_guard(header);
+
+  fprintf(header, "#ifdef __i386_on_x86_64__\n");
+  fprintf(header, "#pragma clang default_addr_space(pop)\n");
+  fprintf(header, "#pragma clang storage_addr_space(pop)\n");
+  fprintf(header, "#endif\n");
+
   fprintf(header, "#endif /* __%s__ */\n", header_token);
 
   fclose(header);

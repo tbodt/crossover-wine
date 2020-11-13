@@ -3549,6 +3549,8 @@ void find_vs_compile_args(const struct wined3d_state *state, const struct wined3
     else
         args->flatshading = 0;
 
+    args->emulated_clipplanes = find_emulated_clipplanes(context, state);
+
     init_interpolation_compile_args(args->interpolation_mode,
             args->next_shader_type == WINED3D_SHADER_TYPE_PIXEL ? pixel_shader : NULL, d3d_info);
 }
@@ -3610,7 +3612,7 @@ static HRESULT shader_init(struct wined3d_shader *shader, struct wined3d_device 
     list_init(&shader->reg_maps.indexable_temps);
     list_init(&shader->shader_list_entry);
 
-    if (desc->byte_code_size == ~(size_t)0)
+    if (desc->byte_code_size == ~(SIZE_T)0)
     {
         struct wined3d_shader_version shader_version;
         const struct wined3d_shader_frontend *fe;
@@ -4115,6 +4117,16 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
         {
             args->fog = WINED3D_FFP_PS_FOG_OFF;
         }
+    }
+    /* Only inser the KIL fragment.texcoord[clip] line if clipping is used.
+     * It is expensive because KIL can break early Z discard. Its cheaper to
+     * have two shaders than KIL needlessly. The same applies to the
+     * clipplane emulation in GLSL with discard. */
+    if (!shader->device->adapter->d3d_info.vs_clipping && use_vs(state)
+            && state->render_states[WINED3D_RS_CLIPPING]
+            && state->render_states[WINED3D_RS_CLIPPLANEENABLE])
+    {
+        args->clip = TRUE;
     }
 
     if (!d3d_info->full_ffp_varyings)

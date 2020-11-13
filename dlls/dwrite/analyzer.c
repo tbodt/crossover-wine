@@ -1968,14 +1968,14 @@ static ULONG WINAPI fontfallback_Release(IDWriteFontFallback1 *iface)
     return IDWriteFactory7_Release(fallback->factory);
 }
 
-static int compare_mapping_range(const void *a, const void *b)
+static int compare_mapping_range(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    UINT32 ch = *(UINT32 *)a;
-    DWRITE_UNICODE_RANGE *range = (DWRITE_UNICODE_RANGE *)b;
+    const UINT32 * HOSTPTR ch = a;
+    const DWRITE_UNICODE_RANGE * HOSTPTR range = b;
 
-    if (ch > range->last)
+    if (*ch > range->last)
         return 1;
-    else if (ch < range->first)
+    else if (*ch < range->first)
         return -1;
     else
         return 0;

@@ -3952,6 +3952,30 @@ __ASM_GLOBAL_FUNC( enum_mon_callback_wrapper,
     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
     __ASM_CFI(".cfi_same_value %ebp\n\t")
     "ret" )
+#elif defined(__i386_on_x86_64__)
+/* Some apps pass a non-stdcall callback to EnumDisplayMonitors,
+ * so we need a small assembly wrapper to call it.
+ * MJ's Help Diagnostic expects that %ecx contains the address to the rect.
+ */
+extern BOOL CDECL enum_mon_callback_wrapper( HMONITOR monitor, LPRECT rect, struct enum_mon_data *data );
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(enum_mon_callback_wrapper),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "subl $8,%esp\n\t"
+                     "movl 16(%ebp),%eax\n\t"    /* data */
+                     "movl 12(%ebp),%ecx\n\t"    /* rect */
+                     "pushl 4(%eax)\n\t"         /* data->lparam */
+                     "pushl %ecx\n\t"            /* rect */
+                     "pushl 8(%eax)\n\t"         /* data->hdc */
+                     "pushl 8(%ebp)\n\t"         /* monitor */
+                     "call *(%eax)\n\t"          /* data->proc */
+                     "leave\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret" )
 #endif /* __i386__ */
 
 static BOOL CALLBACK enum_mon_callback( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
@@ -3963,6 +3987,11 @@ static BOOL CALLBACK enum_mon_callback( HMONITOR monitor, HDC hdc, LPRECT rect, 
     if (!IntersectRect( &monrect, &monrect, &data->limit )) return TRUE;
 #ifdef __i386__
     return enum_mon_callback_wrapper( monitor, &monrect, data );
+#elif defined(__i386_on_x86_64__)
+    if (wine_is_thunk32to64(data->proc))
+        return data->proc( monitor, data->hdc, &monrect, data->lparam );
+    else
+        return WINE_CALL_IMPL32(enum_mon_callback_wrapper)( monitor, &monrect, data );
 #else
     return data->proc( monitor, data->hdc, &monrect, data->lparam );
 #endif

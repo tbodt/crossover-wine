@@ -26,6 +26,7 @@
 #include <winbase.h>
 #include <winternl.h>
 #include <wine/server_protocol.h>
+#include <wine/winheader_enter.h>
 
 /* client communication functions */
 
@@ -109,9 +110,9 @@ static inline HANDLE wine_server_ptr_handle( obj_handle_t handle )
 }
 
 /* convert a client pointer to a server client_ptr_t */
-static inline client_ptr_t wine_server_client_ptr( const void *ptr )
+static inline client_ptr_t wine_server_client_ptr( const void * HOSTPTR ptr )
 {
-    return (client_ptr_t)(ULONG_PTR)ptr;
+    return (client_ptr_t)(ULONG_HOSTPTR)ptr;
 }
 
 /* convert a server client_ptr_t to a real pointer */
@@ -138,5 +139,7 @@ static inline void *wine_server_get_ptr( client_ptr_t ptr )
         while(0); \
     } while(0)
 
+
+#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_WINE_SERVER_H */

@@ -41,6 +41,12 @@
 
 #include "wine/unicode.h"
 
+typedef struct _SID_AND_ATTRIBUTES_HOSTPTR {
+  SID  *Sid;
+  DWORD Attributes;
+} SID_AND_ATTRIBUTES_HOSTPTR;
+
+
 #define MAX_SUBAUTH_COUNT 1
 
 const LUID SeIncreaseQuotaPrivilege        = {  5, 0 };
@@ -85,16 +91,16 @@ static const SID_N(2) builtin_users_sid = { SID_REVISION, 2, { SECURITY_NT_AUTHO
 static const SID_N(3) builtin_logon_sid = { SID_REVISION, 3, { SECURITY_NT_AUTHORITY }, { SECURITY_LOGON_IDS_RID, 0, 0 } };
 static const SID_N(5) domain_users_sid = { SID_REVISION, 5, { SECURITY_NT_AUTHORITY }, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, DOMAIN_GROUP_RID_USERS } };
 
-const PSID security_world_sid = (PSID)&world_sid;
-static const PSID security_local_sid = (PSID)&local_sid;
-static const PSID security_interactive_sid = (PSID)&interactive_sid;
-static const PSID security_authenticated_user_sid = (PSID)&authenticated_user_sid;
-const PSID security_local_system_sid = (PSID)&local_system_sid;
-const PSID security_local_user_sid = (PSID)&local_user_sid;
-const PSID security_builtin_admins_sid = (PSID)&builtin_admins_sid;
-const PSID security_builtin_users_sid = (PSID)&builtin_users_sid;
-const PSID security_domain_users_sid = (PSID)&domain_users_sid;
-const PSID security_high_label_sid = (PSID)&high_label_sid;
+SID *const security_world_sid = (SID*)&world_sid;
+static SID *const security_local_sid = (SID*)&local_sid;
+static SID *const security_interactive_sid = (SID*)&interactive_sid;
+static SID *const security_authenticated_user_sid = (SID*)&authenticated_user_sid;
+SID *const security_local_system_sid = (SID*)&local_system_sid;
+SID *const security_local_user_sid = (SID*)&local_user_sid;
+SID *const security_builtin_admins_sid = (SID*)&builtin_admins_sid;
+SID *const security_builtin_users_sid = (SID*)&builtin_users_sid;
+SID *const security_domain_users_sid = (SID*)&domain_users_sid;
+SID *const security_high_label_sid = (SID*)&high_label_sid;
 
 static luid_t prev_luid_value = { 1000, 0 };
 
@@ -148,6 +154,7 @@ static const struct object_ops token_ops =
     no_add_queue,              /* add_queue */
     NULL,                      /* remove_queue */
     NULL,                      /* signaled */
+    NULL,                      /* get_esync_fd */
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
@@ -537,7 +544,7 @@ static void token_destroy( struct object *obj )
  *   allocated.
  */
 static struct token *create_token( unsigned primary, const SID *user,
-                                   const SID_AND_ATTRIBUTES *groups, unsigned int group_count,
+                                   const SID_AND_ATTRIBUTES_HOSTPTR *groups, unsigned int group_count,
                                    const LUID_AND_ATTRIBUTES *privs, unsigned int priv_count,
                                    const ACL *default_dacl, TOKEN_SOURCE source,
                                    const luid_t *modified_id,
@@ -736,7 +743,7 @@ struct sid_data
     unsigned int subauth[MAX_SUBAUTH_COUNT];
 };
 
-static struct security_descriptor *create_security_label_sd( struct token *token, PSID label_sid )
+static struct security_descriptor *create_security_label_sd( struct token *token, SID *label_sid )
 {
     size_t sid_len = security_sid_len( label_sid ), sacl_size, sd_size;
     SYSTEM_MANDATORY_LABEL_ACE *smla;
@@ -772,7 +779,7 @@ static struct security_descriptor *create_security_label_sd( struct token *token
     return sd;
 }
 
-int token_assign_label( struct token *token, PSID label )
+int token_assign_label( struct token *token, SID *label )
 {
     struct security_descriptor *sd;
     int ret = 0;
@@ -794,9 +801,9 @@ struct token *token_create_admin( void )
     static const unsigned int alias_users_subauth[] = { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS };
     /* on Windows, this value changes every time the user logs on */
     static const unsigned int logon_subauth[] = { SECURITY_LOGON_IDS_RID, 0, 1 /* FIXME: should be randomly generated when tokens are inherited by new processes */ };
-    PSID alias_admins_sid;
-    PSID alias_users_sid;
-    PSID logon_sid;
+    SID *alias_admins_sid;
+    SID *alias_users_sid;
+    SID *logon_sid;
     const SID *user_sid = security_unix_uid_to_sid( getuid() );
     ACL *default_dacl = create_default_dacl( user_sid );
 
@@ -833,7 +840,7 @@ struct token *token_create_admin( void )
         };
         /* note: we don't include non-builtin groups here for the user -
          * telling us these is the job of a client-side program */
-        const SID_AND_ATTRIBUTES admin_groups[] =
+        const SID_AND_ATTRIBUTES_HOSTPTR admin_groups[] =
         {
             { security_world_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
             { security_local_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },

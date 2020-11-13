@@ -34,7 +34,13 @@
 
 #define MAX_DOS_DRIVES 26
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+#ifdef __i386_on_x86_64__
+#define SYSCALL(func) WINE_CALL_IMPL32(__syscall_##func)
+#else
+#define SYSCALL(func) __syscall_##func
+#endif
+
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__arm__) || defined(__aarch64__)
 static const UINT_PTR page_size = 0x1000;
 #else
 extern UINT_PTR page_size DECLSPEC_HIDDEN;
@@ -60,7 +66,7 @@ extern NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOO
 extern NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int flags, BOOL *self ) DECLSPEC_HIDDEN;
 extern LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr ) DECLSPEC_HIDDEN;
 
-#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+#if (defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__arm__) || defined(__aarch64__)
 extern RUNTIME_FUNCTION *lookup_function_info( ULONG_PTR pc, ULONG_PTR *base, LDR_MODULE **module ) DECLSPEC_HIDDEN;
 #endif
 
@@ -88,7 +94,7 @@ extern void heap_set_debug_flags( HANDLE handle ) DECLSPEC_HIDDEN;
 extern void init_unix_codepage(void) DECLSPEC_HIDDEN;
 extern void init_locale( HMODULE module ) DECLSPEC_HIDDEN;
 extern void init_user_process_params( SIZE_T data_size ) DECLSPEC_HIDDEN;
-extern char **build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
+extern char * HOSTPTR *build_envp( const WCHAR *envW ) DECLSPEC_HIDDEN;
 extern NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS status ) DECLSPEC_HIDDEN;
 
 /* server support */
@@ -110,6 +116,7 @@ extern unsigned int server_queue_process_apc( HANDLE process, const apc_call_t *
 extern int server_remove_fd_from_cache( HANDLE handle ) DECLSPEC_HIDDEN;
 extern int server_get_unix_fd( HANDLE handle, unsigned int access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, unsigned int *options ) DECLSPEC_HIDDEN;
+extern int receive_fd( obj_handle_t *handle ) DECLSPEC_HIDDEN;
 extern int server_pipe( int fd[2] ) DECLSPEC_HIDDEN;
 extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
                                          data_size_t *ret_len ) DECLSPEC_HIDDEN;
@@ -183,12 +190,12 @@ extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, SIZE_T reserve_s
 extern void virtual_clear_thread_stack( void *stack_end ) DECLSPEC_HIDDEN;
 extern int virtual_handle_stack_fault( void *addr ) DECLSPEC_HIDDEN;
 extern BOOL virtual_is_valid_code_address( const void *addr, SIZE_T size ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_handle_fault( const void * HOSTPTR addr, DWORD err, BOOL on_signal_stack ) DECLSPEC_HIDDEN;
 extern unsigned int virtual_locked_server_call( void *req_ptr ) DECLSPEC_HIDDEN;
 extern ssize_t virtual_locked_read( int fd, void *addr, size_t size ) DECLSPEC_HIDDEN;
 extern ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset ) DECLSPEC_HIDDEN;
 extern BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
-extern BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
+extern BOOL virtual_check_buffer_for_write( void * HOSTPTR ptr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern SIZE_T virtual_uninterrupted_read_memory( const void *addr, void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_uninterrupted_write_memory( void *addr, const void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
 extern void VIRTUAL_SetForceExec( BOOL enable ) DECLSPEC_HIDDEN;
@@ -197,6 +204,9 @@ extern void virtual_set_large_address_space(void) DECLSPEC_HIDDEN;
 extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
+extern struct _KUSER_SHARED_DATA *user_shared_data_external DECLSPEC_HIDDEN;
+extern void create_user_shared_data_thread(void) DECLSPEC_HIDDEN;
+extern BYTE* CDECL __wine_user_shared_data(void);
 
 /* completion */
 extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue,
@@ -204,7 +214,7 @@ extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue,
 
 /* locale */
 extern LCID user_lcid, system_lcid;
-extern int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen) DECLSPEC_HIDDEN;
+extern int ntdll_umbstowcs(DWORD flags, const char* HOSTPTR src, int srclen, WCHAR* dst, int dstlen) DECLSPEC_HIDDEN;
 extern int ntdll_wcstoumbs(DWORD flags, const WCHAR* src, int srclen, char* dst, int dstlen,
                            const char* defchar, int *used ) DECLSPEC_HIDDEN;
 
@@ -238,6 +248,8 @@ struct debug_info
 struct ntdll_thread_data
 {
     struct debug_info *debug_info;    /* info for debugstr functions */
+    int                esync_queue_fd;/* fd to wait on for driver events */
+    int                esync_apc_fd;  /* fd to wait on for user APCs */
     void              *start_stack;   /* stack for thread startup */
     int                request_fd;    /* fd for sending server requests */
     int                reply_fd;      /* fd for receiving server replies */

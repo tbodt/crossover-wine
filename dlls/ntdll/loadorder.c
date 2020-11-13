@@ -63,9 +63,9 @@ static struct loadorder_list env_list;
  * Sorting and comparing function used in sort and search of loadorder
  * entries.
  */
-static int cmp_sort_func(const void *s1, const void *s2)
+static int cmp_sort_func(const void * HOSTPTR s1, const void * HOSTPTR s2)
 {
-    return strcmpiW(((const module_loadorder_t *)s1)->modulename, ((const module_loadorder_t *)s2)->modulename);
+    return strcmpiW(((const module_loadorder_t * HOSTPTR)s1)->modulename, ((const module_loadorder_t * HOSTPTR)s2)->modulename);
 }
 
 
@@ -228,9 +228,9 @@ static void add_load_order_set( WCHAR *entry )
  */
 static void init_load_order(void)
 {
-    const char *order = getenv( "WINEDLLOVERRIDES" );
-    UNICODE_STRING strW;
+    const char * HOSTPTR order = getenv( "WINEDLLOVERRIDES" );
     WCHAR *entry, *next;
+    int len;
 
     init_done = TRUE;
     if (!order) return;
@@ -249,8 +249,13 @@ static void init_load_order(void)
         exit(0);
     }
 
-    RtlCreateUnicodeStringFromAsciiz( &strW, order );
-    entry = strW.Buffer;
+    if ((len = ntdll_umbstowcs( 0, order, strlen(order) + 1, NULL, 0 )) <= 0 ||
+        !(entry = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(*entry) ))) return;
+    if (ntdll_umbstowcs( 0, order, strlen(order) + 1, entry, len ) <= 0)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, entry );
+        return;
+    }
     while (*entry)
     {
         while (*entry == ';') entry++;
@@ -278,7 +283,7 @@ static void init_load_order(void)
  */
 static inline enum loadorder get_env_load_order( const WCHAR *module )
 {
-    module_loadorder_t tmp, *res;
+    module_loadorder_t tmp, * HOSTPTR res;
 
     tmp.modulename = module;
     /* some bsearch implementations (Solaris) are buggy when the number of items is 0 */

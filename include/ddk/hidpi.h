@@ -19,6 +19,8 @@
 #ifndef __HIDPI_H__
 #define __HIDPI_H__
 
+#include "wine/winheader_enter.h"
+
 typedef enum _HIDP_REPORT_TYPE
 {
     HidP_Input,
@@ -222,5 +224,7 @@ NTSTATUS WINAPI HidP_GetData(HIDP_REPORT_TYPE ReportType, HIDP_DATA *DataList, U
 #define HIDP_STATUS_BUTTON_NOT_PRESSED       (HIDP_ERROR_CODES(0xcu,0x0f))
 #define HIDP_STATUS_REPORT_DOES_NOT_EXIST    (HIDP_ERROR_CODES(0xcu,0x10))
 #define HIDP_STATUS_NOT_IMPLEMENTED          (HIDP_ERROR_CODES(0xcu,0x20))
+
+#include "wine/winheader_exit.h"
 
 #endif /* __HIDPI_H__ */

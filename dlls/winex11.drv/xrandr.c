@@ -177,7 +177,7 @@ static int xrandr10_get_current_mode(void)
     return res;
 }
 
-static LONG xrandr10_set_current_mode( int mode )
+static LONG xrandr10_set_current_mode( int mode, struct x11drv_mode_info *mode_info )
 {
     SizeID size;
     Rotation rot;
@@ -380,12 +380,15 @@ static void get_screen_size( XRRScreenResources *resources, unsigned int *width,
     }
 }
 
-static LONG xrandr12_set_current_mode( int mode )
+static LONG xrandr12_set_current_mode( int mode, struct x11drv_mode_info *mode_info )
 {
     unsigned int screen_width, screen_height;
     Status status = RRSetConfigFailed;
+    Screen *screen;
+    XWindowAttributes attr;
     XRRScreenResources *resources;
     XRRCrtcInfo *crtc_info;
+    unsigned int max_width, max_height;
 
     mode = mode % xrandr_mode_count;
 
@@ -448,7 +451,7 @@ static LONG xrandr12_set_current_mode( int mode )
 
     if (status != RRSetConfigSuccess)
     {
-        ERR("Resolution change not successful -- perhaps display has changed?\n");
+        ERR("Resolution change not successful (%u) -- perhaps display has changed?\n", status);
         return DISP_CHANGE_FAILED;
     }
 
@@ -960,7 +963,9 @@ static BOOL xrandr14_get_monitors( ULONG_PTR adapter_id, struct x11drv_monitor *
     /* Active monitors, need to find other monitors with the same coordinates as mirrored */
     else
     {
-        query_work_area( &work_rect );
+        HRGN rgn = query_work_area();
+        GetRgnBox( rgn, &work_rect );  /* FIXME: actually use region */
+        DeleteObject( rgn );
         primary_rect = get_primary_rect( screen_resources );
 
         for (i = 0; i < screen_resources->noutput; ++i)

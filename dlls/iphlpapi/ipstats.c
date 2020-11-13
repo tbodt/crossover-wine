@@ -1347,10 +1347,10 @@ static MIB_IPFORWARDTABLE *append_ipforward_row( HANDLE heap, DWORD flags, MIB_I
     return table;
 }
 
-static int compare_ipforward_rows(const void *a, const void *b)
+static int compare_ipforward_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_IPFORWARDROW *rowA = a;
-    const MIB_IPFORWARDROW *rowB = b;
+    const MIB_IPFORWARDROW * HOSTPTR rowA = a;
+    const MIB_IPFORWARDROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = rowA->dwForwardDest - rowB->dwForwardDest) != 0) return ret;
@@ -1478,7 +1478,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
        int mib[6] = {CTL_NET, PF_ROUTE, 0, PF_INET, NET_RT_DUMP, 0};
        size_t needed;
        char *buf = NULL, *lim, *next, *addrPtr;
-       struct rt_msghdr *rtm;
+       struct rt_msghdr * WIN32PTR rtm;
 
        if (sysctl (mib, 6, NULL, &needed, NULL, 0) < 0)
        {
@@ -1505,7 +1505,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
        {
           int i;
 
-          rtm = (struct rt_msghdr *)next;
+          rtm = (struct rt_msghdr * WIN32PTR)next;
 
           if (rtm->rtm_type != RTM_GET)
           {
@@ -1617,10 +1617,10 @@ static MIB_IPNETTABLE *append_ipnet_row( HANDLE heap, DWORD flags, MIB_IPNETTABL
     return table;
 }
 
-static int compare_ipnet_rows(const void *a, const void *b)
+static int compare_ipnet_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_IPNETROW *rowA = a;
-    const MIB_IPNETROW *rowB = b;
+    const MIB_IPNETROW * HOSTPTR rowA = a;
+    const MIB_IPNETROW * HOSTPTR rowB = b;
 
     return ntohl(rowA->dwAddr) - ntohl(rowB->dwAddr);
 }
@@ -1741,8 +1741,8 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
       int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO};
       size_t needed;
       char *buf = NULL, *lim, *next;
-      struct rt_msghdr *rtm;
-      struct sockaddr_inarp *sinarp;
+      struct rt_msghdr * WIN32PTR rtm;
+      struct sockaddr_inarp * WIN32PTR sinarp;
       struct sockaddr_dl *sdl;
 
       if (sysctl (mib, ARRAY_SIZE(mib),  NULL, &needed, NULL, 0) == -1)
@@ -1769,8 +1769,8 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
       next = buf;
       while(next < lim)
       {
-          rtm = (struct rt_msghdr *)next;
-          sinarp=(struct sockaddr_inarp *)(rtm + 1);
+          rtm = (struct rt_msghdr * WIN32PTR)next;
+          sinarp=(struct sockaddr_inarp * WIN32PTR)(rtm + 1);
           sdl = (struct sockaddr_dl *)((char *)sinarp + ROUNDUP(sinarp->sin_len));
           if(sdl->sdl_alen) /* arp entry */
           {
@@ -1891,10 +1891,10 @@ static inline MIB_TCP_STATE TCPStateToMIBState (int state)
    }
 }
 
-static int compare_tcp_rows(const void *a, const void *b)
+static int compare_tcp_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_TCPROW *rowA = a;
-    const MIB_TCPROW *rowB = b;
+    const MIB_TCPROW * HOSTPTR rowA = a;
+    const MIB_TCPROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = ntohl (rowA->dwLocalAddr) - ntohl (rowB->dwLocalAddr)) != 0) return ret;
@@ -2046,7 +2046,7 @@ static unsigned int find_owning_pid( struct pid_map *map, unsigned int num_entri
     procstat_close( pstat );
     return 0;
 #elif defined(HAVE_PROC_PIDINFO)
-    struct proc_fdinfo *fds;
+    struct proc_fdinfo * WIN32PTR fds;
     struct socket_fdinfo sock;
     unsigned int i, j, n;
 
@@ -2195,7 +2195,7 @@ DWORD build_tcp_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
     {
         size_t Len = 0;
         char *Buf = NULL;
-        struct xinpgen *pXIG, *pOrigXIG;
+        struct xinpgen * WIN32PTR pXIG, * WIN32PTR pOrigXIG;
         struct pid_map *pMap = NULL;
         unsigned NumEntries;
 
@@ -2225,12 +2225,12 @@ DWORD build_tcp_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
         /* Might be nothing here; first entry is just a header it seems */
         if (Len <= sizeof (struct xinpgen)) goto done;
 
-        pOrigXIG = (struct xinpgen *)Buf;
+        pOrigXIG = (struct xinpgen * WIN32PTR)Buf;
         pXIG = pOrigXIG;
 
-        for (pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len);
+        for (pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len);
              pXIG->xig_len > sizeof (struct xinpgen);
-             pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len))
+             pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
 #if __FreeBSD_version >= 1200026
             struct xtcpcb *pTCPData = (struct xtcpcb *)pXIG;
@@ -2418,10 +2418,10 @@ static MIB_UDPTABLE *append_udp_row( UDP_TABLE_CLASS class, HANDLE heap, DWORD f
     return table;
 }
 
-static int compare_udp_rows(const void *a, const void *b)
+static int compare_udp_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_UDPROW *rowA = a;
-    const MIB_UDPROW *rowB = b;
+    const MIB_UDPROW * HOSTPTR rowA = a;
+    const MIB_UDPROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = rowA->dwLocalAddr - rowB->dwLocalAddr) != 0) return ret;
@@ -2508,7 +2508,7 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
     {
         size_t Len = 0;
         char *Buf = NULL;
-        struct xinpgen *pXIG, *pOrigXIG;
+        struct xinpgen * WIN32PTR pXIG, * WIN32PTR pOrigXIG;
         struct pid_map *pMap = NULL;
         unsigned NumEntries;
 
@@ -2539,12 +2539,12 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
         /* Might be nothing here; first entry is just a header it seems */
         if (Len <= sizeof (struct xinpgen)) goto done;
 
-        pOrigXIG = (struct xinpgen *)Buf;
+        pOrigXIG = (struct xinpgen * WIN32PTR)Buf;
         pXIG = pOrigXIG;
 
-        for (pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len);
+        for (pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len);
              pXIG->xig_len > sizeof (struct xinpgen);
-             pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len))
+             pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
 #if __FreeBSD_version >= 1200026
             struct xinpcb *pINData = (struct xinpcb *)pXIG;
@@ -2663,10 +2663,10 @@ static MIB_UDP6TABLE *append_udp6_row( UDP_TABLE_CLASS class, HANDLE heap, DWORD
     return table;
 }
 
-static int compare_udp6_rows(const void *a, const void *b)
+static int compare_udp6_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_UDP6ROW *rowA = a;
-    const MIB_UDP6ROW *rowB = b;
+    const MIB_UDP6ROW * HOSTPTR rowA = a;
+    const MIB_UDP6ROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = memcmp(&rowA->dwLocalAddr, &rowB->dwLocalAddr, sizeof(rowA->dwLocalAddr)) != 0)) return ret;

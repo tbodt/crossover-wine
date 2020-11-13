@@ -64,12 +64,12 @@ static inline LPWSTR heap_strdupnW(const WCHAR *str, UINT32 len)
     return ret;
 }
 
-static inline const char *debugstr_range(const DWRITE_TEXT_RANGE *range)
+static inline const char * HOSTPTR debugstr_range(const DWRITE_TEXT_RANGE *range)
 {
     return wine_dbg_sprintf("%u:%u", range->startPosition, range->length);
 }
 
-static inline const char *debugstr_matrix(const DWRITE_MATRIX *m)
+static inline const char * HOSTPTR debugstr_matrix(const DWRITE_MATRIX *m)
 {
     if (!m) return "(null)";
     return wine_dbg_sprintf("{%.2f,%.2f,%.2f,%.2f,%.2f,%.2f}", m->m11, m->m12, m->m21, m->m22,
@@ -103,12 +103,12 @@ static inline BOOL dwrite_array_reserve(void **elements, size_t *capacity, size_
     return TRUE;
 }
 
-static inline const char *debugstr_tag(DWORD tag)
+static inline const char * HOSTPTR debugstr_tag(DWORD tag)
 {
     return debugstr_an((char *)&tag, 4);
 }
 
-const char *debugstr_sa_script(UINT16) DECLSPEC_HIDDEN;
+const char * HOSTPTR debugstr_sa_script(UINT16) DECLSPEC_HIDDEN;
 
 static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
 {

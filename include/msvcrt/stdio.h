@@ -8,6 +8,8 @@
 #ifndef __WINE_STDIO_H
 #define __WINE_STDIO_H
 
+#include "wine/winheader_enter.h"
+
 #include <corecrt.h>
 
 #ifndef RC_INVOKED
@@ -81,7 +83,7 @@ extern "C" {
 #endif
 
 #ifndef _STDIO_DEFINED
-# ifdef __i386__
+# if defined(__i386__) || defined(__i386_on_x86_64__)
 FILE* __cdecl __p__iob(void);
 #  define _iob (__p__iob())
 # else
@@ -126,6 +128,9 @@ int    __cdecl _unlink(const char*);
 int    WINAPIV _scprintf(const char*,...);
 int    __cdecl _vscprintf(const char*,__ms_va_list);
 int    __cdecl _vsnprintf(char*,size_t,const char*,__ms_va_list);
+#ifdef __i386_on_x86_64__
+int    __cdecl _vsnprintf(char* HOSTPTR,size_t,const char* HOSTPTR,__ms_va_list) __attribute__((overloadable)) asm(__ASM_NAME("wine__vsnprintf_HOSTPTR"));
+#endif
 int    __cdecl _vsnprintf_s(char*,size_t,size_t,const char*,__ms_va_list);
 int    __cdecl _vsprintf_p_l(char*,size_t,const char*,_locale_t,__ms_va_list);
 
@@ -301,6 +306,12 @@ static inline int unlink(const char* path) { return _unlink(path); }
 #define _UNLINK_DEFINED
 #endif
 static inline int vsnprintf(char *buffer, size_t size, const char *format, __ms_va_list args) { return _vsnprintf(buffer,size,format,args); }
+#ifdef __i386_on_x86_64__
+static inline int vsnprintf(char * HOSTPTR buffer, size_t size, const char * HOSTPTR format, __ms_va_list args) __attribute__((overloadable))
+{
+    return _vsnprintf(buffer,size,format,args);
+}
+#endif
 #define snprintf _snprintf
 
 static inline wint_t fgetwchar(void) { return _fgetwchar(); }
@@ -310,5 +321,7 @@ static inline int putw(int val, FILE* file) { return _putw(val, file); }
 static inline FILE* wpopen(const wchar_t* command,const wchar_t* mode) { return _wpopen(command, mode); }
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STDIO_H */

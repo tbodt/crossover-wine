@@ -96,13 +96,42 @@ extern int SynthUnit_Initialize(AudioUnit synth, AUGraph graph);
 extern int SynthUnit_Close(AUGraph graph);
 
 
+/* CodeWeavers HACK - bug 5193: Allow disabling of MIDI during bottle
+ * creation and installs. */
+static BOOL MIDI_IsEnabled(void)
+{
+    static BOOL inited;
+    static BOOL enabled = TRUE;
+
+    if (!inited)
+    {
+        if (getenv("CX_DISABLE_COREAUDIO_MIDI"))
+        {
+            TRACE("MIDI support disabled by environment variable.\n");
+            enabled = FALSE;
+        }
+        inited = TRUE;
+    }
+
+    return enabled;
+}
+
+
 LONG CoreAudio_MIDIInit(void)
 {
     int i;
     CHAR szPname[MAXPNAMELEN] = {0};
 
-    int numDest = MIDIGetNumberOfDestinations();
-    CFStringRef name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("wineMIDIClient.%d"), getpid());
+    int numDest;
+    CFStringRef name;
+
+    /* CodeWeavers HACK - bug 5193: Allow disabling of MIDI during bottle
+     * creation and installs. */
+    if (!MIDI_IsEnabled())
+        return DRV_SUCCESS;
+
+    numDest = MIDIGetNumberOfDestinations();
+    name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("wineMIDIClient.%d"), getpid());
 
     wineMIDIClient = CoreMIDI_CreateClient( name );
     if (wineMIDIClient == NULL)
@@ -199,6 +228,11 @@ LONG CoreAudio_MIDIInit(void)
 
 LONG CoreAudio_MIDIRelease(void)
 {
+    /* CodeWeavers HACK - bug 5193: Allow disabling of MIDI during bottle
+     * creation and installs. */
+    if (!MIDI_IsEnabled())
+        return DRV_SUCCESS;
+
     TRACE("\n");
     if (MIDIIn_NumDevs > 0)
     {
@@ -813,9 +847,9 @@ void MIDIIn_SendMessage(MIDIMessage msg)
     CFRelease(messagePort);
 }
 
-static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info)
+static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void * HOSTPTR info)
 {
-    MIDIMessage *msg = NULL;
+    MIDIMessage * HOSTPTR msg = NULL;
     int i = 0;
     MIDISource *src = NULL;
     DWORD sendData = 0;
@@ -826,7 +860,7 @@ static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFD
     switch (msgid)
     {
         case 0:
-            msg = (MIDIMessage *) CFDataGetBytePtr(data);
+            msg = (MIDIMessage * HOSTPTR) CFDataGetBytePtr(data);
             TRACE("devID=%d\n", msg->devID);
              for (i = 0; i < msg->length; ++i) {
                 TRACE("%02X ", msg->data[i]);
@@ -948,6 +982,11 @@ static DWORD WINAPI MIDIIn_MessageThread(LPVOID p)
 */
 DWORD WINAPI CoreAudio_modMessage(UINT wDevID, UINT wMsg, DWORD dwUser, DWORD dwParam1, DWORD dwParam2)
 {
+    /* CodeWeavers HACK - bug 5193: Allow disabling of MIDI during bottle
+     * creation and installs. */
+    if (!MIDI_IsEnabled())
+        return MMSYSERR_NOTENABLED;
+
     TRACE("%d %08x %08x %08x %08x\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {
@@ -989,6 +1028,11 @@ DWORD WINAPI CoreAudio_modMessage(UINT wDevID, UINT wMsg, DWORD dwUser, DWORD dw
 */
 DWORD WINAPI CoreAudio_midMessage(UINT wDevID, UINT wMsg, DWORD dwUser, DWORD dwParam1, DWORD dwParam2)
 {
+    /* CodeWeavers HACK - bug 5193: Allow disabling of MIDI during bottle
+     * creation and installs. */
+    if (!MIDI_IsEnabled())
+        return MMSYSERR_NOTENABLED;
+
     TRACE("%d %08x %08x %08x %08x\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
     switch (wMsg) {
         case DRVM_INIT:

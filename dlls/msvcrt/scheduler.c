@@ -1131,7 +1131,7 @@ void __asm_dummy_vtables(void) {
 
 void msvcrt_init_scheduler(void *base)
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     init_Context_rtti(base);
     init_ContextBase_rtti(base);
     init_ExternalContextBase_rtti(base);

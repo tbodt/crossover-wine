@@ -1743,7 +1743,7 @@ static PCCERT_CONTEXT find_cert_by_name_str_a(HCERTSTORE store, DWORD dwType,
 
     if (pvPara)
     {
-        int len = MultiByteToWideChar(CP_ACP, 0, pvPara, -1, NULL, 0);
+        int len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pvPara, -1, NULL, 0);
         LPWSTR str = CryptMemAlloc(len * sizeof(WCHAR));
 
         if (str)

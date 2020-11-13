@@ -51,6 +51,7 @@ static BOOL ODBC_LoadDMFunctions(void);
 WINE_DEFAULT_DEBUG_CHANNEL(odbc);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+#include "wine/hostptraddrspace_enter.h"
 static SQLRETURN (*pSQLAllocConnect)(SQLHENV,SQLHDBC*);
 static SQLRETURN (*pSQLAllocEnv)(SQLHENV*);
 static SQLRETURN (*pSQLAllocHandle)(SQLSMALLINT,SQLHANDLE,SQLHANDLE*);
@@ -169,12 +170,13 @@ static SQLRETURN (*pSQLTablesW)(SQLHSTMT,SQLWCHAR*,SQLSMALLINT,SQLWCHAR*,SQLSMAL
 static SQLRETURN (*pSQLTransact)(SQLHENV,SQLHDBC,SQLUSMALLINT);
 static SQLRETURN (*pSQLGetDiagRecA)(SQLSMALLINT,SQLHANDLE,SQLSMALLINT,SQLCHAR*,SQLINTEGER*,
                                     SQLCHAR*,SQLSMALLINT,SQLSMALLINT*);
+#include "wine/hostptraddrspace_exit.h"
 
 #define ERROR_FREE 0
 #define ERROR_SQLERROR  1
 #define ERROR_LIBRARY_NOT_FOUND 2
 
-static void *dmHandle;
+static void * HOSTPTR dmHandle;
 static int nErrorType;
 
 SQLRETURN WINAPI ODBC32_SQLAllocEnv(SQLHENV *);
@@ -511,7 +513,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
 
 static BOOL ODBC_LoadDriverManager(void)
 {
-   const char *s = getenv("LIB_ODBC_DRIVER_MANAGER");
+   const char * HOSTPTR s = getenv("LIB_ODBC_DRIVER_MANAGER");
    char error[256];
 
 #ifdef SONAME_LIBODBC

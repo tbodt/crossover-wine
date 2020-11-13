@@ -39,6 +39,8 @@
 #include "oaidl.h"
 #include <wine/list.h>
 
+#include <wine/winheader_enter.h>
+
 #define ADDRSIZE        (dbg_curr_process->be_cpu->pointer_size)
 #define ADDRWIDTH       (ADDRSIZE * 2)
 
@@ -252,8 +254,8 @@ struct dbg_process
 struct be_process_io
 {
     BOOL        (*close_process)(struct dbg_process*, BOOL);
-    BOOL        (*read)(HANDLE, const void*, void*, SIZE_T, SIZE_T*);
-    BOOL        (*write)(HANDLE, void*, const void*, SIZE_T, SIZE_T*);
+    BOOL        (*read)(HANDLE, const void* HOSTPTR, void*, SIZE_T, SIZE_T* HOSTPTR);
+    BOOL        (*write)(HANDLE, void* HOSTPTR, const void*, SIZE_T, SIZE_T*);
     BOOL        (*get_selector)(HANDLE, DWORD, LDT_ENTRY*);
 };
 
@@ -518,5 +520,7 @@ enum debug_int_var
 
 /* include CPU dependent bits */
 #include "be_cpu.h"
+
+#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_DEBUGGER_H */

@@ -78,55 +78,18 @@ BOOL CDECL MFDRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
     RECT16	rect16;
     LPINT16	lpdx16 = NULL;
     BOOL	ret;
-    unsigned int i, j;
+    unsigned int i;
     LPSTR       ascii;
-    DWORD len;
-    CHARSETINFO csi;
-    int charset = GetTextCharset( dev->hdc );
-    UINT cp = CP_ACP;
 
-    if(TranslateCharsetInfo(ULongToPtr(charset), &csi, TCI_SRCCHARSET))
-        cp = csi.ciACP;
-    else {
-        switch(charset) {
-	case OEM_CHARSET:
-	    cp = GetOEMCP();
-	    break;
-	case DEFAULT_CHARSET:
-	    cp = GetACP();
-	    break;
-
-	case VISCII_CHARSET:
-	case TCVN_CHARSET:
-	case KOI8_CHARSET:
-	case ISO3_CHARSET:
-	case ISO4_CHARSET:
-	case ISO10_CHARSET:
-	case CELTIC_CHARSET:
-	  /* FIXME: These have no place here, but because x11drv
-	     enumerates fonts with these (made up) charsets some apps
-	     might use them and then the FIXME below would become
-	     annoying.  Now we could pick the intended codepage for
-	     each of these, but since it's broken anyway we'll just
-	     use CP_ACP and hope it'll go away...
-	  */
-	    cp = CP_ACP;
-	    break;
-
-
-	default:
-	    FIXME("Can't find codepage for charset %d\n", charset);
-	    break;
-	}
+    ascii = HeapAlloc(GetProcessHeap(), 0, count);
+    for(i = 0; i < count; i++) {
+        if(str[i] > 0xff)
+            ascii[i] = '?';
+        else
+            ascii[i] = (BYTE)(str[i] & 0xff);
     }
 
-
-    TRACE("cp == %d\n", cp);
-    len = WideCharToMultiByte(cp, 0, str, count, NULL, 0, NULL, NULL);
-    ascii = HeapAlloc(GetProcessHeap(), 0, len);
-    WideCharToMultiByte(cp, 0, str, count, ascii, len, NULL, NULL);
-    TRACE("mapped %s -> %s\n", debugstr_wn(str, count), debugstr_an(ascii, len));
-
+    TRACE("mapped %s -> %s\n", debugstr_wn(str, count), debugstr_an(ascii, count));
 
     if (lprect)
     {
@@ -137,16 +100,12 @@ BOOL CDECL MFDRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
     }
 
     if(lpDx) {
-        lpdx16 = HeapAlloc( GetProcessHeap(), 0, sizeof(INT16)*len );
-	for(i = j = 0; i < len; )
-	    if(IsDBCSLeadByteEx(cp, ascii[i])) {
-	        lpdx16[i++] = lpDx[j++];
-		lpdx16[i++] = 0;
-	    } else
-	        lpdx16[i++] = lpDx[j++];
+        lpdx16 = HeapAlloc( GetProcessHeap(), 0, sizeof(INT16)*count );
+	for(i = 0; i < count; i++)
+            lpdx16[i] = lpDx[i];
     }
 
-    ret = MFDRV_MetaExtTextOut(dev,x,y,flags,lprect?&rect16:NULL,ascii,len,lpdx16);
+    ret = MFDRV_MetaExtTextOut(dev,x,y,flags,lprect?&rect16:NULL,ascii,count,lpdx16);
     HeapFree( GetProcessHeap(), 0, ascii );
     HeapFree( GetProcessHeap(), 0, lpdx16 );
     return ret;

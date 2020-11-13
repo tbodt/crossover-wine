@@ -41,6 +41,8 @@
 /* Wine internal vulkan driver version, needs to be bumped upon vulkan_funcs changes. */
 #define WINE_VULKAN_DRIVER_VERSION 7
 
+#include "wine/winheader_enter.h"
+
 struct vulkan_funcs
 {
     /* Vulkan global functions. These are the only calls at this point a graphics driver
@@ -131,5 +133,7 @@ static inline void *get_vulkan_driver_instance_proc_addr(
 
     return get_vulkan_driver_device_proc_addr(vulkan_funcs, name);
 }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_VULKAN_DRIVER_H */

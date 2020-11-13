@@ -56,7 +56,8 @@ typedef enum
 {
     WARP_DEFAULT,
     WARP_DISABLE,
-    WARP_FORCE_ON
+    WARP_FORCE_ON,
+    WARP_FORCE_EDGE
 } WARP_MOUSE;
 
 struct SysMouseImpl
@@ -222,6 +223,8 @@ static SysMouseImpl *alloc_device(REFGUID rguid, IDirectInputImpl *dinput)
             newDevice->warp_override = WARP_DISABLE;
         else if (!_strnicmp(buffer, "force", -1))
             newDevice->warp_override = WARP_FORCE_ON;
+        else if (!strcasecmp(buffer, "force_edge"))
+            newDevice->warp_override = WARP_FORCE_EDGE;
     }
     if (appkey) RegCloseKey(appkey);
     if (hkey) RegCloseKey(hkey);
@@ -355,7 +358,16 @@ static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM
                 wdata = pt1.y;
             }
 
-            if (pt.x || pt.y)
+            if (This->warp_override == WARP_FORCE_EDGE)
+            {
+                RECT rect;
+                /* CW HACK 6615 */
+                GetWindowRect(This->base.win, &rect);
+                if (hook->pt.x < rect.left+2 || hook->pt.y < rect.top+2 ||
+                    hook->pt.x > rect.right-2 || hook->pt.y > rect.bottom-2)
+                    This->need_warp = TRUE;
+            }
+            else if (pt.x || pt.y)
             {
                 if ((This->warp_override == WARP_FORCE_ON) ||
                     (This->warp_override != WARP_DISABLE && (This->base.dwCoopLevel & DISCL_EXCLUSIVE)))
@@ -486,7 +498,7 @@ static HRESULT WINAPI SysMouseWImpl_Acquire(LPDIRECTINPUTDEVICE8W iface)
         ShowCursor(FALSE); /* hide cursor */
         warp_check( This, TRUE );
     }
-    else if (This->warp_override == WARP_FORCE_ON)
+    else if (This->warp_override >= WARP_FORCE_ON)
     {
         /* Need a window to warp mouse in. */
         if (!This->base.win) This->base.win = GetDesktopWindow();
@@ -527,7 +539,7 @@ static HRESULT WINAPI SysMouseWImpl_Unacquire(LPDIRECTINPUTDEVICE8W iface)
     }
 
     /* And put the mouse cursor back where it was at acquire time */
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON)
+    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override >= WARP_FORCE_ON)
     {
         TRACE("warping mouse back to %s\n", wine_dbgstr_point(&This->org_coords));
         SetCursorPos(This->org_coords.x, This->org_coords.y);

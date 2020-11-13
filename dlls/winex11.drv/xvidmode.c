@@ -127,7 +127,7 @@ static int X11DRV_XF86VM_GetCurrentMode(void)
   return 0;
 }
 
-static LONG X11DRV_XF86VM_SetCurrentMode(int mode)
+static LONG X11DRV_XF86VM_SetCurrentMode(int mode, struct x11drv_mode_info *mode_info)
 {
   DWORD dwBpp = screen_bpp;
   /* only set modes from the original color depth */

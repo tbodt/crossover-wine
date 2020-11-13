@@ -436,25 +436,11 @@ static BOOL get_win9x_registry_version( RTL_OSVERSIONINFOEXW *version )
 
 
 /**********************************************************************
- *         parse_win_version
- *
- * Parse the contents of the Version key.
+ *         parse_version_string
  */
-static BOOL parse_win_version( HANDLE hkey )
+static BOOL parse_version_string( const WCHAR *name )
 {
-    static const WCHAR VersionW[] = {'V','e','r','s','i','o','n',0};
-
-    UNICODE_STRING valueW;
-    WCHAR *name, tmp[64];
-    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
-    DWORD i, count;
-
-    RtlInitUnicodeString( &valueW, VersionW );
-    if (NtQueryValueKey( hkey, &valueW, KeyValuePartialInformation, tmp, sizeof(tmp) - sizeof(WCHAR), &count ))
-        return FALSE;
-
-    name = (WCHAR *)info->Data;
-    name[info->DataLength / sizeof(WCHAR)] = 0;
+    int i;
 
     for (i = 0; i < ARRAY_SIZE(version_names); i++)
     {
@@ -466,6 +452,29 @@ static BOOL parse_win_version( HANDLE hkey )
 
     ERR( "Invalid Windows version value %s specified in config file.\n", debugstr_w(name) );
     return FALSE;
+}
+
+/**********************************************************************
+ *         parse_win_version
+ *
+ * Parse the contents of the Version key.
+ */
+static BOOL parse_win_version( HKEY hkey )
+{
+    static const WCHAR VersionW[] = {'V','e','r','s','i','o','n',0};
+
+    UNICODE_STRING valueW;
+    WCHAR *name, tmp[64];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
+    DWORD count;
+
+    RtlInitUnicodeString( &valueW, VersionW );
+    if (NtQueryValueKey( hkey, &valueW, KeyValuePartialInformation, tmp, sizeof(tmp), &count ))
+        return FALSE;
+
+    name = (WCHAR *)info->Data;
+    name[info->DataLength / sizeof(WCHAR)] = 0;
+    return parse_version_string( name );
 }
 
 
@@ -484,6 +493,23 @@ void version_init(void)
     WCHAR appversion[MAX_PATH+20];
 
     current_version = &VersionData[WIN7];
+
+    /* awful CrossOver hack^H^H^H^Hproprietary enhancement */
+    {
+        static const WCHAR cxverW[] = {'C','X','_','W','I','N','D','O','W','S','_','V','E','R','S','I','O','N',0};
+        UNICODE_STRING valueW;
+        WCHAR cxversion[32];
+
+        RtlInitUnicodeString( &nameW, cxverW );
+        valueW.MaximumLength = sizeof(cxversion);
+        valueW.Buffer = cxversion;
+        if (RtlQueryEnvironmentVariable_U(NULL, &nameW, &valueW) == STATUS_SUCCESS)
+        {
+            TRACE( "getting version from CX_WINDOWS_VERSION\n" );
+            got_win_ver = parse_version_string( cxversion );
+            goto done;
+        }
+    }
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
     attr.Length = sizeof(attr);

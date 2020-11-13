@@ -2262,7 +2262,16 @@ MSVCRT_size_t CDECL _mbstrlen(const char* str)
 /*********************************************************************
  *		_mbtowc_l(MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 int CDECL MSVCRT_mbtowc_l(MSVCRT_wchar_t *dst, const char* str, MSVCRT_size_t n, MSVCRT__locale_t locale)
+{
+    return MSVCRT_mbtowc_l((MSVCRT_wchar_t * HOSTPTR)dst, (const char* HOSTPTR)str, n, locale);
+}
+
+int CDECL MSVCRT_mbtowc_l(MSVCRT_wchar_t * HOSTPTR dst, const char* HOSTPTR str, MSVCRT_size_t n, MSVCRT__locale_t locale) __attribute__((overloadable))
+#else
+int CDECL MSVCRT_mbtowc_l(MSVCRT_wchar_t *dst, const char* str, MSVCRT_size_t n, MSVCRT__locale_t locale)
+#endif
 {
     MSVCRT_pthreadlocinfo locinfo;
     MSVCRT_wchar_t tmpdst = '\0';

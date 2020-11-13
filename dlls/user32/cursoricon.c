@@ -121,8 +121,33 @@ static int get_display_bpp(void)
 
 #ifdef SONAME_LIBPNG
 
-static void *libpng_handle;
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
+/* CX Hack 9660:
+ * Search for more soname names than the one
+ * that we happened to build Wine against. */
+static struct {
+    const char *soname;
+    const char *verstring;
+} libpng_candidates[] = {
+    { SONAME_LIBPNG, PNG_LIBPNG_VER_STRING },
+    { "libpng16.so", "1.6.0" },
+    { "libpng16.so.0", "1.6.0" },
+    { "libpng16.so.16", "1.6.0" },
+    { "libpng15.so", "1.5.0" },
+    { "libpng15.so.0", "1.5.0" },
+    { "libpng15.so.15", "1.5.0" },
+    { "libpng14.so", "1.4.0" },
+    { "libpng14.so.0", "1.4.0" },
+    { "libpng14.so.14", "1.4.0" },
+    { "libpng12.so", "1.2.0" },
+    { "libpng12.so.0", "1.2.0" },
+    { "libpng12.so.12", "1.2.0" },
+};
+
+static const char *soname_libpng;
+static const char *libpng_ver_string;
+
+static void * HOSTPTR libpng_handle;
+#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p##f
 MAKE_FUNCPTR(png_create_read_struct);
 MAKE_FUNCPTR(png_create_info_struct);
 MAKE_FUNCPTR(png_destroy_read_struct);
@@ -148,7 +173,16 @@ static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
 
 static BOOL WINAPI load_libpng( INIT_ONCE *once, void *param, void **context )
 {
-    if (!(libpng_handle = wine_dlopen(SONAME_LIBPNG, RTLD_NOW, NULL, 0)))
+    int i;
+
+    for(i = 0; i < sizeof(libpng_candidates) / sizeof(*libpng_candidates); ++i){
+        soname_libpng = libpng_candidates[i].soname;
+        libpng_ver_string = libpng_candidates[i].verstring;
+        libpng_handle = wine_dlopen(soname_libpng, RTLD_NOW, NULL, 0);
+        if(libpng_handle)
+            break;
+    }
+    if (!libpng_handle)
     {
         WARN( "failed to load %s\n", SONAME_LIBPNG );
         return TRUE;
@@ -156,7 +190,7 @@ static BOOL WINAPI load_libpng( INIT_ONCE *once, void *param, void **context )
 #define LOAD_FUNCPTR(f) \
     if ((p##f = wine_dlsym(libpng_handle, #f, NULL, 0)) == NULL) \
     { \
-        WARN( "%s not found in %s\n", #f, SONAME_LIBPNG ); \
+        WARN( "%s not found in %s\n", #f, soname_libpng ); \
         libpng_handle = NULL; \
         return TRUE; \
     }
@@ -208,7 +242,7 @@ struct png_wrapper
 
 static void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-    struct png_wrapper *png = ppng_get_io_ptr(png_ptr);
+    struct png_wrapper * HOSTPTR png = ppng_get_io_ptr(png_ptr);
 
     if (png->size - png->pos >= length)
     {
@@ -266,7 +300,7 @@ static BITMAPINFO *load_png(const char *png_data, DWORD *size)
     struct png_wrapper png;
     png_structp png_ptr;
     png_infop info_ptr;
-    png_bytep *row_pointers = NULL;
+    png_bytep * WIN32PTR row_pointers = NULL;
     jmp_buf jmpbuf;
     int color_type, bit_depth, bpp, width, height;
     int rowbytes, image_size, mask_size = 0, i;
@@ -283,7 +317,7 @@ static BITMAPINFO *load_png(const char *png_data, DWORD *size)
     png.pos = 0;
 
     /* initialize libpng */
-    png_ptr = ppng_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_ptr = ppng_create_read_struct(libpng_ver_string, NULL, NULL, NULL);
     if (!png_ptr) return NULL;
 
     info_ptr = ppng_create_info_struct(png_ptr);

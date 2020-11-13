@@ -1186,9 +1186,9 @@ static BOOL CRYPT_AsnEncodeRdnAttr(DWORD dwCertEncodingType,
     return ret;
 }
 
-static int BLOBComp(const void *l, const void *r)
+static int BLOBComp(const void * HOSTPTR l, const void * HOSTPTR r)
 {
-    const CRYPT_DER_BLOB *a = l, *b = r;
+    const CRYPT_DER_BLOB * HOSTPTR a = l, * HOSTPTR b = r;
     int ret;
 
     if (!(ret = memcmp(a->pbData, b->pbData, min(a->cbData, b->cbData))))

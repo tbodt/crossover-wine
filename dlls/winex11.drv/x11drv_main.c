@@ -178,6 +178,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_WINDOW_TYPE_NORMAL",
     "_NET_WM_WINDOW_TYPE_UTILITY",
     "_NET_WORKAREA",
+    "_GTK_WORKAREAS_D0",
     "_XEMBED",
     "_XEMBED_INFO",
     "XdndAware",
@@ -211,7 +212,9 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/plain",
     "text/rtf",
     "text/richtext",
-    "text/uri-list"
+    "text/uri-list",
+    "_CX_WORKAREA", /* CodeWeavers Hack bug 5752 */
+    "_CX_APPLEWM_TAG", /* CodeWeavers Hack bug 9517 */
 };
 
 /***********************************************************************
@@ -298,13 +301,16 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
                error_evt->error_code, error_evt->request_code );
         return 0;
     }
+    ERR("XERROR: code %d request %d minor %d xid %08lx\n",
+        error_evt->error_code,
+        error_evt->request_code,
+        error_evt->minor_code,
+        error_evt->resourceid);
     if (TRACE_ON(synchronous))
     {
-        ERR( "X protocol error: serial=%ld, request_code=%d - breaking into debugger\n",
-             error_evt->serial, error_evt->request_code );
         DebugBreak();  /* force an entry in the debugger */
+        old_error_handler( display, error_evt );
     }
-    old_error_handler( display, error_evt );
     return 0;
 }
 
@@ -348,6 +354,8 @@ static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
  */
 static void setup_options(void)
 {
+    static const WCHAR steamwebhelperW[] = {'s','t','e','a','m','w','e','b','h','e','l','p','e','r','.','e','x','e',0};
+    static const WCHAR steamW[] = {'s','t','e','a','m','.','e','x','e',0};
     static const WCHAR x11driverW[] = {'\\','X','1','1',' ','D','r','i','v','e','r',0};
     char buffer[64];
     WCHAR bufferW[MAX_PATH+16];
@@ -377,6 +385,9 @@ static void setup_options(void)
             if (RegOpenKeyW( tmpkey, appname, &appkey )) appkey = 0;
             RegCloseKey( tmpkey );
         }
+
+        if (!lstrcmpW(appname, steamwebhelperW) || !strcmpW(appname, steamW))
+            enable_shm_surface = TRUE;
     }
 
     if (!get_config_key( hkey, appkey, "Managed", buffer, sizeof(buffer) ))
@@ -437,6 +448,15 @@ static void setup_options(void)
         alloc_system_colors = atoi(buffer);
 
     get_config_key( hkey, appkey, "InputStyle", input_style, sizeof(input_style) );
+
+    if (!get_config_key(hkey, appkey, "NvThreads", buffer, sizeof(buffer)))
+    {
+        if (IS_OPTION_TRUE(buffer[0]))
+        {
+            setenv("__GL_THREADED_OPTIMIZATIONS", "1", 1);
+            SetEnvironmentVariableA("__GL_THREADED_OPTIMIZATIONS", "1");
+        }
+    }
 
     if (appkey) RegCloseKey( appkey );
     if (hkey) RegCloseKey( hkey );
@@ -643,12 +663,15 @@ void CDECL X11DRV_ThreadDetach(void)
     }
 }
 
+extern void CDECL __wine_esync_set_queue_fd( int fd );
 
 /* store the display fd into the message queue */
 static void set_queue_display_fd( Display *display )
 {
     HANDLE handle;
     int ret;
+
+    __wine_esync_set_queue_fd( ConnectionNumber(display) );
 
     if (wine_server_fd_to_handle( ConnectionNumber(display), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
     {

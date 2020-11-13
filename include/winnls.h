@@ -20,6 +20,9 @@
 #define __WINE_WINNLS_H
 #ifndef NONLS
 
+#include "wine/winheader_enter.h"
+#include "wine/asm.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -957,6 +960,9 @@ WINBASEAPI INT         WINAPI LCMapStringW(LCID,DWORD,LPCWSTR,INT,LPWSTR,INT);
 WINBASEAPI INT         WINAPI LCMapStringEx(LPCWSTR,DWORD,LPCWSTR,INT,LPWSTR,INT,LPNLSVERSIONINFO,LPVOID,LPARAM);
 WINBASEAPI LCID        WINAPI LocaleNameToLCID(LPCWSTR,DWORD);
 WINBASEAPI INT         WINAPI MultiByteToWideChar(UINT,DWORD,LPCSTR,INT,LPWSTR,INT);
+#ifdef __i386_on_x86_64__
+WINBASEAPI INT         WINAPI MultiByteToWideChar(UINT,DWORD,const char * HOSTPTR,INT,WCHAR * HOSTPTR,INT) __attribute__((overloadable)) asm(__ASM_NAME("wine_MultiByteToWideChar_HOSTPTR"));
+#endif
 WINNORMALIZEAPI INT    WINAPI NormalizeString(NORM_FORM,LPCWSTR,INT,LPWSTR,INT);
 WINBASEAPI INT         WINAPI ResolveLocaleName(LPCWSTR,LPWSTR,INT);
 WINBASEAPI INT         WINAPI SetCalendarInfoA(LCID,CALID,CALTYPE,LPCSTR);
@@ -969,11 +975,16 @@ WINBASEAPI BOOL        WINAPI SetThreadLocale(LCID);
 WINBASEAPI LANGID      WINAPI SetThreadUILanguage(LANGID);
 WINBASEAPI BOOL        WINAPI SetUserGeoID(GEOID);
 WINBASEAPI INT         WINAPI WideCharToMultiByte(UINT,DWORD,LPCWSTR,INT,LPSTR,INT,LPCSTR,LPBOOL);
+#ifdef __i386_on_x86_64__
+WINBASEAPI INT         WINAPI WideCharToMultiByte(UINT,DWORD,const WCHAR* HOSTPTR,INT,char* HOSTPTR,INT,const char* HOSTPTR, BOOL* HOSTPTR) __attribute__((overloadable)) asm(__ASM_NAME("wine_WideCharToMultiByte_HOSTPTR"));
+#endif
 WINBASEAPI INT         WINAPI FindNLSStringEx(const WCHAR *,DWORD,const WCHAR *,INT,const WCHAR *,INT,INT *,NLSVERSIONINFO *,void *,LPARAM);
 
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* !NONLS */
 #endif  /* __WINE_WINNLS_H */

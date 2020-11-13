@@ -1096,3 +1096,94 @@ BOOL WINAPI GetFileMUIInfo(DWORD flags, PCWSTR path, FILEMUIINFO *info, DWORD *s
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
+
+
+#ifdef __i386_on_x86_64__
+/******************************************************************************
+ *	MultiByteToWideChar HOSTPTR overload   (kernel32.@)
+ *  FIXME: Avoid heap copies.
+ */
+INT WINAPI DECLSPEC_HOTPATCH MultiByteToWideChar( UINT codepage, DWORD flags, const char * HOSTPTR src, INT srclen,
+                                                  WCHAR * HOSTPTR dst, INT dstlen ) __attribute__((overloadable))
+{
+    int ret;
+    char *src_copy = NULL;
+    WCHAR *dst_copy = NULL;
+
+    if (!src || !srclen || (!dst && dstlen) || dstlen < 0)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (srclen < 0) srclen = strlen(src) + 1;
+
+    if ((ULONG_HOSTPTR)src >= 0x100000000)
+    {
+        src_copy = heap_alloc(srclen);
+        memcpy(src_copy, src, srclen);
+    }
+    if ((ULONG_HOSTPTR)dst >= 0x100000000)
+        dst_copy = heap_alloc(dstlen * sizeof(*dst));
+
+    ret = MultiByteToWideChar(codepage, flags, src_copy ?: ADDRSPACECAST(const char*, src), srclen,
+                              dst_copy ?: ADDRSPACECAST(WCHAR*, dst), dstlen );
+    if (ret > 0 && dst_copy)
+        memcpy(dst, dst_copy, ret);
+
+    heap_free(src_copy);
+    heap_free(dst_copy);
+    return ret;
+}
+
+
+/***********************************************************************
+ *	WideCharToMultiByte HOSTPTR overload   (kernel32.@)
+ *  FIXME: Avoid heap copies.
+ */
+INT WINAPI DECLSPEC_HOTPATCH WideCharToMultiByte( UINT codepage, DWORD flags, const WCHAR * HOSTPTR src,
+                                                  INT srclen, char * HOSTPTR dst, INT dstlen,
+                                                  const char * HOSTPTR defchar, BOOL * HOSTPTR used ) __attribute__((overloadable))
+{
+    int ret;
+    WCHAR *src_copy = NULL;
+    char *dst_copy = NULL;
+    char defchar_copy;
+    BOOL used_copy;
+
+    if (!src || !srclen || (!dst && dstlen) || dstlen < 0)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+
+    if (srclen < 0) srclen = lstrlenW(src) + 1;
+
+    if ((ULONG_HOSTPTR)src >= 0x100000000)
+    {
+        src_copy = heap_alloc(srclen * sizeof(*src));
+        memcpy(src_copy, src, srclen * sizeof(*src));
+    }
+    if ((ULONG_HOSTPTR)dst >= 0x100000000)
+        dst_copy = heap_alloc(dstlen);
+    if ((ULONG_HOSTPTR)defchar >= 0x100000000)
+    {
+        defchar_copy = *defchar;
+        defchar = &defchar_copy;
+    }
+
+    ret = WideCharToMultiByte(codepage, flags, src_copy ?: ADDRSPACECAST(LPCWSTR, src),
+                              srclen, dst_copy ?: ADDRSPACECAST(LPSTR, dst), dstlen,
+                              ADDRSPACECAST(LPCSTR, defchar), used ? &used_copy : NULL);
+    if (ret > 0)
+    {
+        if (dst_copy)
+            memcpy(dst, dst_copy, ret);
+        if (used)
+            *used = used_copy;
+    }
+
+    heap_free(src_copy);
+    heap_free(dst_copy);
+    return ret;
+}
+#endif /* __i386_on_x86_64__ */

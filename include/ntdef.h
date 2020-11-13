@@ -19,6 +19,8 @@
 #ifndef _NTDEF_
 #define _NTDEF_
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,5 +49,7 @@ typedef enum _WAIT_TYPE {
 #define NT_INFORMATION(status)  ((((NTSTATUS)(status)) & 0xc0000000) == 0x40000000)
 #define NT_WARNING(status)      ((((NTSTATUS)(status)) & 0xc0000000) == 0x80000000)
 #define NT_ERROR(status)        ((((NTSTATUS)(status)) & 0xc0000000) == 0xc0000000)
+
+#include "wine/winheader_exit.h"
 
 #endif /* _NTDEF_ */

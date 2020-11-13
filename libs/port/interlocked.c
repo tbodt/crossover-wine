@@ -136,7 +136,7 @@ __ASM_GLOBAL_FUNC(interlocked_xchg_add,
 
 #endif
 
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 #if defined(_MSC_VER)
 

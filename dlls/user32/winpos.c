@@ -2079,7 +2079,7 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     WND *win;
     HWND surface_win = 0, parent = GetAncestor( hwnd, GA_PARENT );
-    BOOL ret, needs_update = FALSE;
+    BOOL ret, needs_update = FALSE, dummy_shm_surface = FALSE;
     RECT visible_rect, old_visible_rect, old_window_rect, old_client_rect, extra_rects[3];
     struct window_surface *old_surface, *new_surface = NULL;
 
@@ -2088,6 +2088,21 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
         new_surface = &dummy_surface;  /* provide a default surface for top-level windows */
         window_surface_add_ref( new_surface );
     }
+/* HACK for cxbug 17460 */
+/* #ifdef __APPLE__ */
+    else if (!(swp_flags & SWP_HIDEWINDOW))
+    {
+        win = WIN_GetPtr( parent );
+        if (win == OBJ_OTHER_PROCESS)
+        {
+            /* provide a default shm surface for windows with parents in other process */
+            new_surface = &dummy_surface;
+            window_surface_add_ref( new_surface );
+            dummy_shm_surface = TRUE;
+        }
+        else if (win && win != WND_DESKTOP) WIN_ReleasePtr( win );
+    }
+/* #endif */
     visible_rect = *window_rect;
     USER_Driver->pWindowPosChanging( hwnd, insert_after, swp_flags,
                                      window_rect, client_rect, &visible_rect, &new_surface );
@@ -2103,6 +2118,14 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
     old_visible_rect = win->visible_rect;
     old_client_rect = win->client_rect;
     old_surface = win->surface;
+
+    if (dummy_shm_surface && new_surface == &dummy_surface)
+    {
+        FIXME("Other process parent\n");
+        window_surface_release( new_surface );
+        new_surface = create_shm_surface( hwnd, &visible_rect, old_surface );
+    }
+
     if (old_surface != new_surface) swp_flags |= SWP_FRAMECHANGED;  /* force refreshing non-client area */
     if (new_surface == &dummy_surface) swp_flags |= SWP_NOREDRAW;
     else if (old_surface == &dummy_surface)
@@ -2730,7 +2753,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     HDC hdc;
     HWND parent;
     LONG hittest = (LONG)(wParam & 0x0f);
-    WPARAM syscommand = wParam & 0xfff0;
+    WPARAM syscommand = wParam & 0xfff0,mmstate;
     MINMAXINFO minmax;
     POINT capturePoint, pt;
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
@@ -2891,7 +2914,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
             else
             {
                 if (!DragFullWindows) draw_moving_frame( parent, hdc, &sizingRect, thickframe );
-                if (hittest == HTCAPTION) OffsetRect( &sizingRect, dx, dy );
+                if (hittest == HTCAPTION || hittest == HTBORDER) OffsetRect( &sizingRect, dx, dy );
                 if (ON_LEFT_BORDER(hittest)) sizingRect.left += dx;
                 else if (ON_RIGHT_BORDER(hittest)) sizingRect.right += dx;
                 if (ON_TOP_BORDER(hittest)) sizingRect.top += dy;
@@ -2899,7 +2922,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
                 capturePoint = pt;
 
                 /* determine the hit location */
-                if (syscommand == SC_SIZE)
+                if (syscommand == SC_SIZE && hittest != HTBORDER)
                 {
                     WPARAM wpSizingHit = 0;
 
@@ -2975,4 +2998,15 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
                               SC_MOUSEMENU + HTSYSMENU, MAKELONG(pt.x,pt.y));
         }
     }
+
+    /* windows finishes this off with a WM_MOUSEMOVE with the current position
+       and buttons state. This message is relied on by some games. */
+    mmstate = 0;
+    if (GetAsyncKeyState(VK_LBUTTON)&0x1) mmstate &= MK_LBUTTON;
+    if (GetAsyncKeyState(VK_RBUTTON)&0x1) mmstate &= MK_RBUTTON;
+    if (GetAsyncKeyState(VK_MBUTTON)&0x1) mmstate &= MK_MBUTTON;
+    if (GetAsyncKeyState(VK_CONTROL)&0x1) mmstate &= MK_CONTROL;
+    if (GetAsyncKeyState(VK_SHIFT)&0x1) mmstate &= MK_SHIFT;
+
+    PostMessageW( hwnd, WM_MOUSEMOVE, mmstate, MAKELONG(pt.x,pt.y) );
 }

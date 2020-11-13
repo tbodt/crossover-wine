@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -30,6 +31,9 @@
 #include "user_private.h"
 #include "controls.h"
 #include "wine/debug.h"
+
+/* For CrossOver Hack #15440 */
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
@@ -1569,6 +1573,7 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
         break;
 
     case SC_KEYMENU:
+        if (getenv("CX_MENU_SOCKET")) break;
         MENU_TrackKbdMenuBar( hwnd, wParam, (WCHAR)lParam );
         break;
 

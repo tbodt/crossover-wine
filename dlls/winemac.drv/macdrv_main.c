@@ -23,6 +23,7 @@
 
 #include <Security/AuthSession.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
+#include <unistd.h> /* CrossOver Hack 11095 */
 
 #include "macdrv.h"
 #include "winuser.h"
@@ -50,6 +51,8 @@ int capture_displays_for_fullscreen = 0;
 BOOL skip_single_buffer_flushes = FALSE;
 BOOL allow_vsync = TRUE;
 BOOL allow_set_gamma = TRUE;
+/* CrossOver Hack 10912: Mac Edit menu */
+int mac_edit_menu = MAC_EDIT_MENU_BY_KEY;
 int left_option_is_alt = 0;
 int right_option_is_alt = 0;
 int left_command_is_ctrl = 0;
@@ -64,6 +67,9 @@ int retina_enabled = FALSE;
 HMODULE macdrv_module = 0;
 int enable_app_nap = FALSE;
 
+/* CrossOver Hack 14364 */
+BOOL force_backing_store = FALSE;
+
 CFDictionaryRef localized_strings;
 
 
@@ -73,7 +79,8 @@ CFDictionaryRef localized_strings;
 const char* debugstr_cf(CFTypeRef t)
 {
     CFStringRef s;
-    const char* ret;
+    const char* HOSTPTR cstring = NULL;
+    const char* ret = NULL;
 
     if (!t) return "(null)";
 
@@ -81,13 +88,13 @@ const char* debugstr_cf(CFTypeRef t)
         s = t;
     else
         s = CFCopyDescription(t);
-    ret = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
-    if (ret) ret = debugstr_a(ret);
+    cstring = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+    if (cstring) ret = debugstr_a(cstring);
     if (!ret)
     {
-        const UniChar* u = CFStringGetCharactersPtr(s);
+        const UniChar* HOSTPTR u = CFStringGetCharactersPtr(s);
         if (u)
-            ret = debugstr_wn((const WCHAR*)u, CFStringGetLength(s));
+            ret = debugstr_wn((const WCHAR* HOSTPTR)u, CFStringGetLength(s));
     }
     if (!ret)
     {
@@ -169,6 +176,16 @@ static void setup_options(void)
     if (!get_config_key(hkey, appkey, "AllowSetGamma", buffer, sizeof(buffer)))
         allow_set_gamma = IS_OPTION_TRUE(buffer[0]);
 
+    /* CrossOver Hack 10912: Mac Edit menu */
+    if (!get_config_key(hkey, appkey, "EditMenu", buffer, sizeof(buffer)))
+    {
+        if (!strcmp(buffer, "message"))
+            mac_edit_menu = MAC_EDIT_MENU_BY_MESSAGE;
+        else if (!strcmp(buffer, "key"))
+            mac_edit_menu = MAC_EDIT_MENU_BY_KEY;
+        else
+            mac_edit_menu = MAC_EDIT_MENU_DISABLED;
+    }
     if (!get_config_key(hkey, appkey, "LeftOptionIsAlt", buffer, sizeof(buffer)))
         left_option_is_alt = IS_OPTION_TRUE(buffer[0]);
     if (!get_config_key(hkey, appkey, "RightOptionIsAlt", buffer, sizeof(buffer)))
@@ -217,6 +234,10 @@ static void setup_options(void)
        processes in the prefix. */
     if (!get_config_key(hkey, NULL, "RetinaMode", buffer, sizeof(buffer)))
         retina_enabled = IS_OPTION_TRUE(buffer[0]);
+
+    /* CrossOver Hack 14364 */
+    if (!get_config_key(hkey, appkey, "ForceOpenGLBackingStore", buffer, sizeof(buffer)))
+        force_backing_store = IS_OPTION_TRUE(buffer[0]);
 
     if (appkey) RegCloseKey(appkey);
     if (hkey) RegCloseKey(hkey);
@@ -283,6 +304,17 @@ static BOOL process_attach(void)
     SessionAttributeBits attributes;
     OSStatus status;
 
+    /* CrossOver Hack 11095.  Cocoa makes a similar call to confstr() during
+       its first pass through the event loop, which happens on the main thread.
+       However, if Wine is double-fork()-ing on a background thread simultaneously
+       with the first such call, the child process can become deadlocked.  It
+       appears to be a bug in the system library.
+
+       By calling this here, we greatly reduce the likelihood of such a race
+       and deadlock. */
+    char dummy[256];
+    confstr(_CS_DARWIN_USER_CACHE_DIR, dummy, sizeof(dummy));
+
     status = SessionGetInfo(callerSecuritySession, NULL, &attributes);
     if (status != noErr || !(attributes & sessionHasGraphicAccess))
         return FALSE;
@@ -300,6 +332,11 @@ static BOOL process_attach(void)
     }
 
     macdrv_init_display_devices(FALSE);
+
+    /* CrossOver Hack 10188: Actually, this disables that hack.  Don't pass
+                             system tray icons to our launcher since the Mac
+                             driver handles them itself. */
+    unsetenv("CX_SYSTRAY_SOCKET");
 
     return TRUE;
 }
@@ -323,6 +360,7 @@ void CDECL macdrv_ThreadDetach(void)
     }
 }
 
+extern void CDECL __wine_esync_set_queue_fd( int fd );
 
 /***********************************************************************
  *              set_queue_display_fd
@@ -333,6 +371,8 @@ static void set_queue_display_fd(int fd)
 {
     HANDLE handle;
     int ret;
+
+    __wine_esync_set_queue_fd(fd);
 
     if (wine_server_fd_to_handle(fd, GENERIC_READ | SYNCHRONIZE, 0, &handle))
     {

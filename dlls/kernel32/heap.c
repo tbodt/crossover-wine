@@ -333,10 +333,10 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
 
-      if (retval == ~0ul) /* It might be a GMEM_MOVEABLE data pointer */
+      if (retval == (SIZE_T)-1) /* It might be a GMEM_MOVEABLE data pointer */
       {
           retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
-          if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
+          if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
       }
    }
    else
@@ -351,7 +351,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
          else
          {
              retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
-             if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
+             if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
          }
       }
       else
@@ -362,7 +362,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
-   if (retval == ~0ul) retval = 0;
+   if (retval == (SIZE_T)-1) retval = 0;
    return retval;
 }
 
@@ -609,7 +609,8 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     TRACE("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
           " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
-          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
-          lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
-          lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );
+          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, (unsigned long)lpBuffer->dwTotalPhys,
+          (unsigned long)lpBuffer->dwAvailPhys, (unsigned long)lpBuffer->dwTotalPageFile,
+          (unsigned long)lpBuffer->dwAvailPageFile, (unsigned long)lpBuffer->dwTotalVirtual,
+          (unsigned long)lpBuffer->dwAvailVirtual );
 }

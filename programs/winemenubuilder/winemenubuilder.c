@@ -96,6 +96,9 @@
 #include "wine/library.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
+#include "wine/heap.h"
+
+#include "cxmenu.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(menubuilder);
 
@@ -195,7 +198,7 @@ struct rb_string_entry
 DEFINE_GUID(CLSID_WICIcnsEncoder, 0x312fb6f1,0xb767,0x409d,0x8a,0x6d,0x0f,0xc1,0x54,0xd4,0xf0,0x5c);
 
 static char *xdg_config_dir;
-static char *xdg_data_dir;
+char *xdg_data_dir;
 static char *xdg_desktop_dir;
 
 
@@ -217,15 +220,6 @@ static unsigned short crc16(const char* string)
         }
     }
     return crc;
-}
-
-static char *strdupA( const char *str )
-{
-    char *ret;
-
-    if (!str) return NULL;
-    if ((ret = HeapAlloc( GetProcessHeap(), 0, strlen(str) + 1 ))) strcpy( ret, str );
-    return ret;
 }
 
 static char* heap_printf(const char *format, ...)
@@ -312,7 +306,7 @@ static BOOL create_directories(char *directory)
     return ret;
 }
 
-static char* wchars_to_utf8_chars(LPCWSTR string)
+char* wchars_to_utf8_chars(LPCWSTR string)
 {
     char *ret;
     INT size = WideCharToMultiByte(CP_UTF8, 0, string, -1, NULL, 0, NULL, NULL);
@@ -332,7 +326,7 @@ static char* wchars_to_unix_chars(LPCWSTR string)
     return ret;
 }
 
-static WCHAR* utf8_chars_to_wchars(LPCSTR string)
+WCHAR* utf8_chars_to_wchars(LPCSTR string)
 {
     WCHAR *ret;
     INT size = MultiByteToWideChar(CP_UTF8, 0, string, -1, NULL, 0);
@@ -1084,6 +1078,8 @@ static HRESULT open_icon(LPCWSTR filename, int index, BOOL bWait, IStream **ppSt
         if (SUCCEEDED(hr))
             hr = validate_ico(ppStream, ppIconDirEntries, numEntries);
     }
+    if (FAILED(hr) && cx_mode) /* Let cxmenu provide the fallback */
+        return hr;
     if (FAILED(hr) && !bWait)
     {
         hr = open_default_icon(ppStream);
@@ -1154,7 +1150,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     } best[ICNS_SLOTS];
     int indexes[ICNS_SLOTS];
     int i;
-    const char* tmpdir;
+    const char* HOSTPTR tmpdir;
     char *icnsPath = NULL;
     LARGE_INTEGER zero;
     HRESULT hr;
@@ -1213,7 +1209,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     }
 
     if (destFilename)
-        *nativeIdentifier = heap_printf("%s", destFilename);
+        *nativeIdentifier = heap_strdup(destFilename);
     else
         *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW);
     if (*nativeIdentifier == NULL)
@@ -1221,8 +1217,23 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
         hr = E_OUTOFMEMORY;
         goto end;
     }
+    if (cx_mode)
+    {
+        char* icnsDir = heap_printf("%s/windata/cxmenu/icons", getenv("WINEPREFIX"));
+        if (icnsDir == NULL)
+        {
+            hr = E_OUTOFMEMORY;
+            goto end;
+        }
+        create_directories(icnsDir);
+        icnsPath = heap_printf("%s/%s.icns", icnsDir, *nativeIdentifier);
+        HeapFree(GetProcessHeap(), 0, icnsDir);
+    }
+    else
+    {
     if (!(tmpdir = getenv("TMPDIR"))) tmpdir = "/tmp";
     icnsPath = heap_printf("%s/%s.icns", tmpdir, *nativeIdentifier);
+    }
     if (icnsPath == NULL)
     {
         hr = E_OUTOFMEMORY;
@@ -1280,7 +1291,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     LARGE_INTEGER zero;
 
     if (destFilename)
-        *nativeIdentifier = heap_printf("%s", destFilename);
+        *nativeIdentifier = heap_strdup(destFilename);
     else
         *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW);
     if (*nativeIdentifier == NULL)
@@ -2034,9 +2045,9 @@ static BOOL add_mimes(const char *xdg_data_dir, struct list *mime_types)
                     if (mime_type_entry)
                     {
                         *pos = 0;
-                        mime_type_entry->mimeType = strdupA(line);
-                        mime_type_entry->glob = strdupA(pos + 1);
-                        mime_type_entry->lower_glob = strdupA(pos + 1);
+                        mime_type_entry->mimeType = heap_strdup(line);
+                        mime_type_entry->glob = heap_strdup(pos + 1);
+                        mime_type_entry->lower_glob = heap_strdup(pos + 1);
                         if (mime_type_entry->lower_glob)
                         {
                             char *l;
@@ -2084,14 +2095,15 @@ static void free_native_mime_types(struct list *native_mime_types)
 
 static BOOL build_native_mime_types(const char *xdg_data_home, struct list *mime_types)
 {
-    char *xdg_data_dirs;
+    char * HOSTPTR xdg_data_dirs_env;
+    char * xdg_data_dirs;
     BOOL ret;
 
-    xdg_data_dirs = getenv("XDG_DATA_DIRS");
-    if (xdg_data_dirs == NULL)
-        xdg_data_dirs = heap_printf("/usr/local/share/:/usr/share/");
+    xdg_data_dirs_env = getenv("XDG_DATA_DIRS");
+    if (xdg_data_dirs_env == NULL)
+        xdg_data_dirs = heap_strdup("/usr/local/share/:/usr/share/");
     else
-        xdg_data_dirs = strdupA(xdg_data_dirs);
+        xdg_data_dirs = heap_strdup(xdg_data_dirs_env);
 
     if (xdg_data_dirs)
     {
@@ -2145,7 +2157,7 @@ static BOOL match_glob(struct list *native_mime_types, const char *extension,
 
     if (*match != NULL)
     {
-        *match = strdupA(*match);
+        *match = heap_strdup(*match);
         if (*match == NULL)
             return FALSE;
     }
@@ -2602,7 +2614,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                 if (contentTypeW != NULL && strchrW(contentTypeW, '/'))
                     mimeTypeA = wchars_to_utf8_chars(contentTypeW);
                 else if ((get_special_mime_type(extensionW)))
-                    mimeTypeA = strdupA(get_special_mime_type(extensionW));
+                    mimeTypeA = heap_strdup(get_special_mime_type(extensionW));
                 else
                     mimeTypeA = heap_printf("application/x-wine-extension-%s", &extensionA[1]);
 
@@ -2659,7 +2671,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             }
             else
             {
-                friendlyAppNameA = heap_printf("A Wine application");
+                friendlyAppNameA = heap_strdup("A Wine application");
                 if (friendlyAppNameA == NULL)
                 {
                     WINE_ERR("out of memory\n");
@@ -2777,6 +2789,7 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
                                    '\\','s','t','a','r','t','.','e','x','e',0};
     char *link_name = NULL, *icon_name = NULL, *work_dir = NULL;
     char *escaped_path = NULL, *escaped_args = NULL, *description = NULL;
+    const char *arch = NULL; /* CrossOver hack 14227 */
     char *wmclass = NULL;
     WCHAR szTmp[INFOTIPSIZE];
     WCHAR szDescription[INFOTIPSIZE], szPath[MAX_PATH], szWorkDir[MAX_PATH];
@@ -2852,6 +2865,11 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
         WINE_ERR("failed to extract icon from %s\n",
                  wine_dbgstr_w( szIconPath[0] ? szIconPath : szPath ));
     }
+
+    /* CrossOver hack 14227 */
+    if (cx_link_is_64_bit(sl, 0))
+        arch = "x86_64";
+    WINE_TRACE("arch       : %s\n", wine_dbgstr_a(arch));
 
     unix_link = wine_get_unix_file_name(link);
     if (unix_link == NULL)
@@ -2933,6 +2951,14 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
     if( WAIT_OBJECT_0 != MsgWaitForMultipleObjects( 1, &hsem, FALSE, INFINITE, QS_ALLINPUT ) )
     {
         WINE_ERR("failed wait for semaphore\n");
+        goto cleanup;
+    }
+
+    if (cx_mode)
+    {
+        r = cx_process_menu(link, in_desktop_dir(csidl), csidl,
+                            szPath, szArgs, icon_name, description, arch);
+        ReleaseSemaphore( hsem, 1, NULL );
         goto cleanup;
     }
 
@@ -3109,6 +3135,16 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
         WINE_ERR("failed wait for semaphore\n");
         goto cleanup;
     }
+
+    if (cx_mode)
+    {
+        r = cx_process_menu(link, in_desktop_dir(csidl), csidl,
+                            NULL, NULL, icon_name, NULL, NULL);
+        ReleaseSemaphore(hSem, 1, NULL);
+        ret = (r != 0);
+        goto cleanup;
+    }
+
     if (in_desktop_dir(csidl))
     {
         char *location;
@@ -3190,7 +3226,7 @@ done:
     return ret;
 }
 
-static BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
+BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
 {
     IShellLinkW *sl;
     IPersistFile *pf;
@@ -3251,7 +3287,7 @@ static BOOL Process_Link( LPCWSTR linkname, BOOL bWait )
     return !r;
 }
 
-static BOOL Process_URL( LPCWSTR urlname, BOOL bWait )
+BOOL Process_URL( LPCWSTR urlname, BOOL bWait )
 {
     IUniformResourceLocatorW *url;
     IPersistFile *pf;
@@ -3352,7 +3388,7 @@ static void RefreshFileTypeAssociations(void)
     hasChanged |= cleanup_associations();
     if (hasChanged)
     {
-        const char *argv[3];
+        const char * HOSTPTR argv[3];
 
         argv[0] = "update-mime-database";
         argv[1] = mime_dir;
@@ -3601,7 +3637,7 @@ static BOOL init_xdg(void)
     {
         create_directories(xdg_config_dir);
         if (getenv("XDG_DATA_HOME"))
-            xdg_data_dir = strdupA(getenv("XDG_DATA_HOME"));
+            xdg_data_dir = heap_strdup(getenv("XDG_DATA_HOME"));
         else
             xdg_data_dir = heap_printf("%s/.local/share", getenv("HOME"));
         if (xdg_data_dir)
@@ -3620,6 +3656,23 @@ static BOOL init_xdg(void)
     }
     WINE_ERR("out of memory\n");
     return FALSE;
+}
+
+static void notify_system_update(void)
+{
+#ifdef __ANDROID__
+    const char *argv[9];
+    argv[0] = "/system/bin/am";
+    argv[1] = "broadcast";
+    argv[2] = "-a";
+    argv[3] = "com.codeweavers.crossover.action.SYNC_LAUNCHERS";
+    argv[4] = "--user";
+    argv[5] = "0";
+    argv[6] = "--es";
+    argv[7] = "prefix";
+    argv[8] =  getenv("WINEPREFIX");
+    _spawnvp(_P_DETACH, argv[0], argv);
+#endif /* __ANDROID__ */
 }
 
 static BOOL associations_enabled(void)
@@ -3651,13 +3704,19 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
     static const WCHAR dash_tW[] = {'-','t',0};
     static const WCHAR dash_uW[] = {'-','u',0};
     static const WCHAR dash_wW[] = {'-','w',0};
+    static const WCHAR cx_allW[] = {'-','-','c','x','-','a','l','l','-','m','e','n','u','s',0};
+    static const WCHAR cx_dump_menusW[] = {'-','-','c','x','-','d','u','m','p','-','m','e','n','u','s',0};
 
     LPWSTR token = NULL, p;
     BOOL bWait = FALSE;
     BOOL bURL = FALSE;
+    BOOL bSystemUpdate = FALSE;
     HRESULT hr;
     int ret = 0;
 
+    if (cx_mode)
+        xdg_data_dir = heap_printf("%s/windata/cxmenu", getenv("WINEPREFIX"));
+    else
     if (!init_xdg())
         return 1;
 
@@ -3675,12 +3734,13 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
 	    break;
         if( !strcmpW( token, dash_aW ) )
         {
-            if (associations_enabled())
+            if (!cx_mode && associations_enabled())
                 RefreshFileTypeAssociations();
             continue;
         }
         if( !strcmpW( token, dash_rW ) )
         {
+            if (!cx_mode)
             cleanup_menus();
             continue;
         }
@@ -3698,6 +3758,16 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
                      thumbnail_lnk(lnkFile, outputFile);
             }
         }
+        else if( !lstrcmpW( token, cx_allW ) )
+        {
+            if (!cx_process_all_menus())
+            {
+	        WINE_ERR("failed to build some menu items\n");
+                ret = 1;
+            }
+        }
+        else if( !lstrcmpW( token, cx_dump_menusW ) )
+            cx_dump_menus = 1;
 	else if( token[0] == '-' )
 	{
 	    WINE_ERR( "unknown option %s\n", wine_dbgstr_w(token) );
@@ -3715,7 +3785,16 @@ int PASCAL wWinMain (HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sh
                 WINE_ERR( "failed to build menu item for %s\n", wine_dbgstr_w(token) );
                 ret = 1;
             }
+            else
+                bSystemUpdate = TRUE;
         }
+    }
+
+    if (cx_menu_file && cx_menu_file != stdout)
+    {
+        fclose( cx_menu_file );
+        if (bSystemUpdate)
+            notify_system_update();
     }
 
     CoUninitialize();

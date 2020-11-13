@@ -21,8 +21,11 @@
 #ifndef __WINE_WINTERNL_H
 #define __WINE_WINTERNL_H
 
+#include "wine/winheader_enter.h"
+
 #include <ntdef.h>
 #include <windef.h>
+#include <wine/asm.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -357,10 +360,10 @@ typedef struct _TEB
     PVOID                        CsrClientThread;                   /* 03c/0070 */
     PVOID                        Win32ThreadInfo;                   /* 040/0078 */
     ULONG                        Win32ClientInfo[31];               /* 044/0080 used for user32 private data in Wine */
-    PVOID                        WOW32Reserved;                     /* 0c0/0100 */
+    PVOID                        WOW32Reserved;                     /* 0c0/0100 used for ntdll syscall thunks */
     ULONG                        CurrentLocale;                     /* 0c4/0108 */
     ULONG                        FpSoftwareStatusRegister;          /* 0c8/010c */
-    PVOID                        SystemReserved1[54];               /* 0cc/0110 used for kernel32 private data in Wine */
+    PVOID                        SystemReserved1[54];               /* 0cc/0110 used for krnl386.exe16 private data in Wine */
     LONG                         ExceptionCode;                     /* 1a4/02c0 */
     ACTIVATION_CONTEXT_STACK     ActivationContextStack;            /* 1a8/02c8 */
     BYTE                         SpareBytes1[24];                   /* 1bc/02e8 */
@@ -396,7 +399,7 @@ typedef struct _TEB
     PVOID                        Instrumentation[16];               /* f2c/16b8 */
     PVOID                        WinSockData;                       /* f6c/1738 */
     ULONG                        GdiBatchCount;                     /* f70/1740 */
-    ULONG                        Spare2;                            /* f74/1744 */
+    ULONG                        Spare2;                            /* f74/1744 used for fakedll thunks */
     ULONG                        GuaranteedStackBytes;              /* f78/1748 */
     PVOID                        ReservedForPerf;                   /* f7c/1750 */
     PVOID                        ReservedForOle;                    /* f80/1758 */
@@ -2227,6 +2230,33 @@ typedef struct _NLSTABLEINFO
     USHORT     *LowerCaseTable;
 } NLSTABLEINFO, *PNLSTABLEINFO;
 
+#define PS_ATTRIBUTE_THREAD  0x00010000
+#define PS_ATTRIBUTE_INPUT   0x00020000
+#define PS_ATTRIBUTE_UNKNOWN 0x00040000
+
+typedef enum _PS_ATTRIBUTE_NUM {
+    PsAttributeClientId = 3,
+} PS_ATTRIBUTE_NUM;
+
+#define PS_ATTRIBUTE_CLIENT_ID (PsAttributeClientId | PS_ATTRIBUTE_THREAD)
+
+typedef struct _PS_ATTRIBUTE {
+    ULONG Attribute;
+    SIZE_T Size;
+    union {
+        ULONG Value;
+        PVOID ValuePtr;
+    };
+    PSIZE_T ReturnLength;
+} PS_ATTRIBUTE;
+
+typedef struct _PS_ATTRIBUTE_LIST {
+    SIZE_T TotalLength;
+    PS_ATTRIBUTE Attributes[1];
+} PS_ATTRIBUTE_LIST, *PPS_ATTRIBUTE_LIST;
+
+
+
 /*************************************************************************
  * Loader structures
  *
@@ -2245,7 +2275,7 @@ typedef struct _LDR_MODULE
     ULONG               Flags;
     SHORT               LoadCount;
     SHORT               TlsIndex;
-    HANDLE              SectionHandle;
+    void*               SectionHandle;
     ULONG               CheckSum;
     ULONG               TimeDateStamp;
     HANDLE              ActivationContext;
@@ -2318,6 +2348,15 @@ typedef struct _SYSTEM_MODULE_INFORMATION
     ULONG               ModulesCount;
     SYSTEM_MODULE       Modules[1]; /* FIXME: should be Modules[0] */
 } SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
+
+typedef struct _SYSTEM_MODULE_INFORMATION_EX
+{
+    ULONG NextOffset;
+    SYSTEM_MODULE BaseInfo;
+    ULONG ImageCheckSum;
+    ULONG TimeDateStamp;
+    void *DefaultBase;
+} SYSTEM_MODULE_INFORMATION_EX, *PSYSTEM_MODULE_INFORMATION_EX;
 
 #define THREAD_CREATE_FLAGS_CREATE_SUSPENDED        0x00000001
 #define THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH      0x00000002
@@ -2524,6 +2563,9 @@ NTSYSAPI NTSTATUS  WINAPI NtReadFile(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STA
 NTSYSAPI NTSTATUS  WINAPI NtReadFileScatter(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,FILE_SEGMENT_ELEMENT*,ULONG,PLARGE_INTEGER,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtReadRequestData(HANDLE,PLPC_MESSAGE,ULONG,PVOID,ULONG,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtReadVirtualMemory(HANDLE,const void*,void*,SIZE_T,SIZE_T*);
+#ifdef __i386_on_x86_64__
+NTSYSAPI NTSTATUS  WINAPI NtReadVirtualMemory(HANDLE,const void* HOSTPTR,void*,SIZE_T,SIZE_T* HOSTPTR) __attribute__((overloadable)) asm(__ASM_NAME("wine_NtReadVirtualMemory_HOSTPTR"));
+#endif
 NTSYSAPI NTSTATUS  WINAPI NtRegisterThreadTerminatePort(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI NtReleaseKeyedEvent(HANDLE,const void*,BOOLEAN,const LARGE_INTEGER*);
 NTSYSAPI NTSTATUS  WINAPI NtReleaseMutant(HANDLE,PLONG);
@@ -2603,6 +2645,9 @@ NTSYSAPI NTSTATUS  WINAPI NtWriteFile(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_ST
 NTSYSAPI NTSTATUS  WINAPI NtWriteFileGather(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,FILE_SEGMENT_ELEMENT*,ULONG,PLARGE_INTEGER,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtWriteRequestData(HANDLE,PLPC_MESSAGE,ULONG,PVOID,ULONG,PULONG);
 NTSYSAPI NTSTATUS  WINAPI NtWriteVirtualMemory(HANDLE,void*,const void*,SIZE_T,SIZE_T*);
+#ifdef __i386_on_x86_64__
+NTSYSAPI NTSTATUS  WINAPI NtWriteVirtualMemory(HANDLE,void* HOSTPTR,const void*,SIZE_T,SIZE_T*) __attribute__((overloadable)) asm(__ASM_NAME("wine_NtWriteVirtualMemory_HOSTPTR"));
+#endif
 NTSYSAPI NTSTATUS  WINAPI NtYieldExecution(void);
 
 NTSYSAPI void      WINAPI RtlAcquirePebLock(void);
@@ -2917,7 +2962,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlUnicodeToUTF8N(LPSTR,DWORD,LPDWORD,LPCWSTR,DWORD);
 NTSYSAPI ULONG     WINAPI RtlUniform(PULONG);
 NTSYSAPI BOOLEAN   WINAPI RtlUnlockHeap(HANDLE);
 NTSYSAPI void      WINAPI RtlUnwind(PVOID,PVOID,PEXCEPTION_RECORD,PVOID);
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 NTSYSAPI void      WINAPI RtlUnwindEx(PVOID,PVOID,PEXCEPTION_RECORD,PVOID,PCONTEXT,PUNWIND_HISTORY_TABLE);
 #elif defined(__ia64__)
 NTSYSAPI void      WINAPI RtlUnwind2(FRAME_POINTERS,PVOID,PEXCEPTION_RECORD,PVOID,PCONTEXT);
@@ -2948,7 +2993,7 @@ NTSYSAPI void      WINAPI RtlWakeConditionVariable(RTL_CONDITION_VARIABLE *);
 NTSYSAPI NTSTATUS  WINAPI RtlWalkHeap(HANDLE,PVOID);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64EnableFsRedirection(BOOLEAN);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64EnableFsRedirectionEx(ULONG,ULONG*);
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 NTSYSAPI NTSTATUS  WINAPI RtlWow64GetThreadContext(HANDLE, WOW64_CONTEXT *);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64SetThreadContext(HANDLE, const WOW64_CONTEXT *);
 #endif
@@ -2961,7 +3006,10 @@ NTSYSAPI NTSTATUS  WINAPI RtlpUnWaitCriticalSection(RTL_CRITICAL_SECTION *);
 NTSYSAPI NTSTATUS  WINAPI vDbgPrintEx(ULONG,ULONG,LPCSTR,__ms_va_list);
 NTSYSAPI NTSTATUS  WINAPI vDbgPrintExWithPrefix(LPCSTR,ULONG,ULONG,LPCSTR,__ms_va_list);
 
-NTSYSAPI int __cdecl _strnicmp(LPCSTR,LPCSTR,size_t);
+NTSYSAPI int __cdecl _strnicmp(LPCSTR,LPCSTR,unsigned __int3264);
+#ifdef __i386_on_x86_64__
+NTSYSAPI int __cdecl _strnicmp(const char * HOSTPTR,const char * HOSTPTR,unsigned __int3264) __attribute__((overloadable)) asm(__ASM_NAME("wine_strnicmp_HOSTPTR"));
+#endif
 
 /* 32-bit only functions */
 
@@ -3061,7 +3109,7 @@ static inline USHORT RtlUshortByteSwap(USHORT s)
 }
 static inline ULONG RtlUlongByteSwap(ULONG i)
 {
-#if defined(__i386__) && defined(__GNUC__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && defined(__GNUC__)
     ULONG ret;
     __asm__("bswap %0" : "=r" (ret) : "0" (i) );
     return ret;
@@ -3124,5 +3172,7 @@ typedef struct
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINTERNL_H */

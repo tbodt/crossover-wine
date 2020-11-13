@@ -132,7 +132,7 @@ static int X11DRV_desktop_GetCurrentMode(void)
     return 0;
 }
 
-static LONG X11DRV_desktop_SetCurrentMode(int mode)
+static LONG X11DRV_desktop_SetCurrentMode(int mode, struct x11drv_mode_info *mode_info)
 {
     DWORD dwBpp = screen_bpp;
     if (dwBpp != dd_modes[mode].bpp)

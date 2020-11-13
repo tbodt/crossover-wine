@@ -51,6 +51,9 @@ static CFMutableDictionaryRef win_datas;
 
 static DWORD activate_on_focus_time;
 
+/* CrossOver Hack #15388 */
+int quicken_signin_hack = 0;
+
 
 /***********************************************************************
  *              get_cocoa_window_features
@@ -64,6 +67,13 @@ static void get_cocoa_window_features(struct macdrv_win_data *data,
     if (disable_window_decorations) return;
     if (IsRectEmpty(&data->window_rect)) return;
 
+    /* CrossOver Hack #15388 */
+    if (quicken_signin_hack)
+    {
+        wf->shadow = TRUE;
+        wf->title_bar = TRUE;
+        wf->close_button = (GetWindowLongW(GetAncestor(data->hwnd, GA_ROOT), GWL_STYLE) & WS_SYSMENU) != 0;
+    }
     if ((style & WS_CAPTION) == WS_CAPTION && !(ex_style & WS_EX_LAYERED))
     {
         wf->shadow = TRUE;
@@ -264,7 +274,7 @@ struct macdrv_win_data *get_win_data(HWND hwnd)
 
     if (!hwnd) return NULL;
     EnterCriticalSection(&win_data_section);
-    if (win_datas && (data = (struct macdrv_win_data*)CFDictionaryGetValue(win_datas, hwnd)))
+    if (win_datas && (data = ADDRSPACECAST(struct macdrv_win_data*, CFDictionaryGetValue(win_datas, hwnd))))
         return data;
     LeaveCriticalSection(&win_data_section);
     return NULL;
@@ -672,6 +682,7 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     WCHAR text[1024];
     struct macdrv_window_features wf;
+    RECT rect;
     CGRect frame;
     DWORD style, ex_style;
     HRGN win_rgn;
@@ -695,13 +706,20 @@ static void create_cocoa_window(struct macdrv_win_data *data)
 
     get_cocoa_window_features(data, style, ex_style, &wf);
 
-    frame = cgrect_from_rect(data->whole_rect);
+    rect = data->whole_rect;
+    /* CrossOver Hack #15388 */
+    if (quicken_signin_hack)
+    {
+        MapWindowPoints(GetAncestor(data->hwnd, GA_PARENT), 0, (POINT *)&rect, 2);
+        OffsetRect(&rect, 22, 22);
+    }
+    frame = cgrect_from_rect(rect);
     constrain_window_frame(&frame);
     if (frame.size.width < 1 || frame.size.height < 1)
         frame.size.width = frame.size.height = 1;
 
-    TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->window_rect),
-          wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
+    TRACE("creating %p window %s whole %s client %s frame %s\n", data->hwnd, wine_dbgstr_rect(&data->window_rect),
+          wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect), wine_dbgstr_cgrect(frame));
 
     data->cocoa_window = macdrv_create_cocoa_window(&wf, frame, data->hwnd, thread_data->queue);
     if (!data->cocoa_window) goto done;
@@ -711,6 +729,10 @@ static void create_cocoa_window(struct macdrv_win_data *data)
 
     /* set the window text */
     if (!InternalGetWindowText(data->hwnd, text, ARRAY_SIZE(text))) text[0] = 0;
+    /* CrossOver Hack #15388 */
+    if (quicken_signin_hack && !text[0] &&
+        !InternalGetWindowText(GetAncestor(data->hwnd, GA_ROOT), text, ARRAY_SIZE(text)))
+        text[0] = 0;
     macdrv_set_cocoa_window_title(data->cocoa_window, text, strlenW(text));
 
     /* set the window region */
@@ -802,13 +824,39 @@ static void set_cocoa_view_parent(struct macdrv_win_data *data, HWND parent)
     macdrv_window cocoa_window = parent_data ? parent_data->cocoa_window : NULL;
     macdrv_view superview = parent_data ? parent_data->client_cocoa_view : NULL;
 
-    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent, cocoa_window ? (void*)cocoa_window : (void*)superview);
+    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent,
+          cocoa_window ? (void* HOSTPTR)cocoa_window : (void* HOSTPTR)superview);
 
     if (!cocoa_window && !superview)
         WARN("hwnd %p new parent %p has no Cocoa window or view in this process\n", data->hwnd, parent);
 
     macdrv_set_view_superview(data->cocoa_view, superview, cocoa_window, NULL, NULL);
     release_win_data(parent_data);
+}
+
+
+/* CrossOver Hack #15388 */
+static BOOL needs_cocoa_window(HWND hwnd, HWND parent)
+{
+    DWORD pid;
+    char class[32];
+
+    if (parent == GetDesktopWindow())
+        return TRUE;
+
+    GetWindowThreadProcessId(parent, &pid);
+    if (pid == GetCurrentProcessId())
+        return FALSE;
+
+    if (!GetClassNameA(hwnd, class, sizeof(class)))
+        return FALSE;
+    if (!strcmp(class, "eo.webbrowser.root"))
+    {
+        quicken_signin_hack = 1;
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 
@@ -839,7 +887,7 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const RECT *win
     data->whole_rect = data->window_rect = *window_rect;
     data->client_rect = *client_rect;
 
-    if (parent == GetDesktopWindow())
+    if (needs_cocoa_window(hwnd, parent))
     {
         create_cocoa_window(data);
         TRACE("win %p/%p window %s whole %s client %s\n",
@@ -1128,13 +1176,22 @@ static void sync_client_view_position(struct macdrv_win_data *data)
 static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, const RECT *old_window_rect,
                                  const RECT *old_whole_rect)
 {
-    CGRect frame = cgrect_from_rect(data->whole_rect);
+    RECT rect;
+    CGRect frame;
     BOOL force_z_order = FALSE;
 
     if (data->cocoa_window)
     {
         if (data->minimized) return;
 
+        rect = data->whole_rect;
+        /* CrossOver Hack #15388 */
+        if (quicken_signin_hack)
+        {
+            MapWindowPoints(GetAncestor(data->hwnd, GA_PARENT), 0, (POINT *)&rect, 2);
+            OffsetRect(&rect, 22, 22);
+        }
+        frame = cgrect_from_rect(rect);
         constrain_window_frame(&frame);
         if (frame.size.width < 1 || frame.size.height < 1)
             frame.size.width = frame.size.height = 1;
@@ -1146,6 +1203,7 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
         BOOL were_equal = (data->cocoa_view == data->client_cocoa_view);
         BOOL now_equal = EqualRect(&data->whole_rect, &data->client_rect);
 
+        frame = cgrect_from_rect(data->whole_rect);
         if (were_equal && !now_equal)
         {
             data->cocoa_view = macdrv_create_view(frame);
@@ -1175,7 +1233,7 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
         sync_window_region(data, (HRGN)1);
 
     TRACE("win %p/%p whole_rect %s frame %s\n", data->hwnd,
-          data->cocoa_window ? (void*)data->cocoa_window : (void*)data->cocoa_view,
+          data->cocoa_window ? (void* HOSTPTR)data->cocoa_window : (void* HOSTPTR)data->cocoa_view,
           wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_cgrect(frame));
 
     if (force_z_order || !(swp_flags & SWP_NOZORDER) || (swp_flags & SWP_SHOWWINDOW))
@@ -1248,8 +1306,46 @@ static void set_app_icon(void)
     CFArrayRef images = create_app_icon_images();
     if (images)
     {
-        macdrv_set_application_icon(images);
+        macdrv_set_application_icon(images, NULL);
         CFRelease(images);
+    }
+    else /* CrossOver Hack 13440: Find an icon from the CrossOver app bundle */
+    {
+        const char * HOSTPTR cx_root;
+        if ((cx_root = getenv("CX_ROOT")) && cx_root[0])
+        {
+            CFURLRef url, temp;
+            url = CFURLCreateFromFileSystemRepresentation(NULL, (UInt8*)cx_root, strlen(cx_root), TRUE);
+            if (url)
+            {
+                temp = CFURLCreateCopyDeletingLastPathComponent(NULL, url);
+                CFRelease(url);
+                url = temp;
+            }
+            if (url)
+            {
+                temp = CFURLCreateCopyDeletingLastPathComponent(NULL, url);
+                CFRelease(url);
+                url = temp;
+            }
+            if (url)
+            {
+                temp = CFURLCreateCopyAppendingPathComponent(NULL, url, CFSTR("Resources"), TRUE);
+                CFRelease(url);
+                url = temp;
+            }
+            if (url)
+            {
+                temp = CFURLCreateCopyAppendingPathComponent(NULL, url, CFSTR("exeIcon.icns"), FALSE);
+                CFRelease(url);
+                url = temp;
+            }
+            if (url)
+            {
+                macdrv_set_application_icon(NULL, url);
+                CFRelease(url);
+            }
+        }
     }
 }
 
@@ -1297,7 +1393,7 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
     MSG msg;
     RECT origRect, movedRect, desktopRect;
     LONG hittest = (LONG)(wparam & 0x0f);
-    POINT capturePoint;
+    POINT capturePoint, pt;
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     BOOL moved = FALSE;
     DWORD dwPoint = GetMessagePos();
@@ -1310,6 +1406,7 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
 
     capturePoint.x = (short)LOWORD(dwPoint);
     capturePoint.y = (short)HIWORD(dwPoint);
+    pt = capturePoint;
     ClipCursor(NULL);
 
     TRACE("hwnd %p hittest %d, pos %d,%d\n", hwnd, hittest, capturePoint.x, capturePoint.y);
@@ -1359,7 +1456,6 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
 
     while(1)
     {
-        POINT pt;
         int dx = 0, dy = 0;
         HMONITOR newmon;
 
@@ -1465,6 +1561,11 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
         SetWindowPos(hwnd, 0, origRect.left, origRect.top, 0, 0,
                      SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
     }
+
+    /* CrossOver hack 4274 */
+    /* Windows finishes this off with a WM_MOUSEMOVE with the current position.
+       This message is relied on by some games. */
+    PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELONG(pt.x, pt.y));
 
     return 0;
 }
@@ -1683,9 +1784,9 @@ void CDECL macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent)
     if (parent == old_parent) return;
     if (!(data = get_win_data(hwnd))) return;
 
-    if (parent != GetDesktopWindow()) /* a child window */
+    if (!needs_cocoa_window(hwnd, parent)) /* a child window */
     {
-        if (old_parent == GetDesktopWindow())
+        if (needs_cocoa_window(hwnd, old_parent))
         {
             /* destroy the old Mac window */
             destroy_cocoa_window(data);
@@ -1772,9 +1873,14 @@ void CDECL macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
 void CDECL macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
 {
     macdrv_window win;
+    WCHAR buf[1024];
 
     TRACE("%p, %s\n", hwnd, debugstr_w(text));
 
+    /* CrossOver Hack #15388 */
+    if (quicken_signin_hack && !text[0] &&
+        InternalGetWindowText(GetAncestor(hwnd, GA_ROOT), buf, sizeof(buf)/sizeof(WCHAR)))
+        text = buf;
     if ((win = macdrv_get_cocoa_window(hwnd, FALSE)))
         macdrv_set_cocoa_window_title(win, text, strlenW(text));
 }
@@ -2238,6 +2344,9 @@ void macdrv_window_close_requested(HWND hwnd)
 {
     HMENU sysmenu;
 
+    /* CrossOver Hack #15388 */
+    if (quicken_signin_hack)
+        hwnd = GetAncestor(hwnd, GA_ROOT);;
     if (GetClassLongW(hwnd, GCL_STYLE) & CS_NOCLOSE)
     {
         TRACE("not closing win %p class style CS_NOCLOSE\n", hwnd);
@@ -2274,6 +2383,7 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
     BOOL being_dragged;
 
     if (!hwnd) return;
+    if (quicken_signin_hack) return; /* CrossOver Hack #15388 */
     if (!(data = get_win_data(hwnd))) return;
     if (!data->on_screen || data->minimized)
     {
@@ -2333,30 +2443,35 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
  */
 void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
 {
-    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    LONG style;
+    HWND top;
 
     if (!hwnd) return;
 
-    TRACE("win %p/%p serial %lu enabled %d visible %d style %08x focus %p active %p fg %p\n",
-          hwnd, event->window, event->window_got_focus.serial, IsWindowEnabled(hwnd),
-          IsWindowVisible(hwnd), style, GetFocus(), GetActiveWindow(), GetForegroundWindow());
+    /* CrossOver Hack #15388 */
+    top = GetAncestor(hwnd, GA_ROOT);
+    style = GetWindowLongW(top, GWL_STYLE);
 
-    if (can_activate_window(hwnd) && !(style & WS_MINIMIZE))
+    TRACE("win %p/%p top %p serial %lu enabled %d visible %d style %08x focus %p active %p fg %p\n",
+          hwnd, event->window, top, event->window_got_focus.serial, IsWindowEnabled(top),
+          IsWindowVisible(top), style, GetFocus(), GetActiveWindow(), GetForegroundWindow());
+
+    if (can_activate_window(top) && !(style & WS_MINIMIZE))
     {
         /* simulate a mouse click on the caption to find out
          * whether the window wants to be activated */
-        LRESULT ma = SendMessageW(hwnd, WM_MOUSEACTIVATE,
-                                  (WPARAM)GetAncestor(hwnd, GA_ROOT),
+        LRESULT ma = SendMessageW(top, WM_MOUSEACTIVATE,
+                                  (WPARAM)top,
                                   MAKELONG(HTCAPTION,WM_LBUTTONDOWN));
         if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
         {
-            TRACE("setting foreground window to %p\n", hwnd);
-            SetForegroundWindow(hwnd);
+            TRACE("setting foreground window to %p\n", top);
+            SetForegroundWindow(top);
             return;
         }
     }
 
-    TRACE("win %p/%p rejecting focus\n", hwnd, event->window);
+    TRACE("win %p/%p top %p rejecting focus\n", hwnd, event->window, top);
     macdrv_window_rejected_focus(event);
 }
 

@@ -25,6 +25,7 @@
 #include <assert.h>
 #include "guiddef.h"
 #include "ndrtypes.h"
+#define WINE_LIST_HOSTADDRSPACE
 #include "wine/list.h"
 
 #ifndef UUID_DEFINED

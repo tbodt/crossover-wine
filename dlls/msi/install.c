@@ -1439,6 +1439,14 @@ UINT MSI_GetComponentStateW(MSIPACKAGE *package, LPCWSTR szComponent,
     if (!comp)
         return ERROR_UNKNOWN_COMPONENT;
 
+    if (1) /* hack for office 2010 sp1 */
+    {
+        static const WCHAR sppW[] =
+            {'s','p','p','_','p','l','u','g','i','n','s','.','x','8','6',0};
+        if (!wcscmp( szComponent, sppW ) && comp->Installed == INSTALLSTATE_LOCAL &&
+            comp->Action == INSTALLSTATE_LOCAL) comp->Action = INSTALLSTATE_UNKNOWN;
+    }
+
     if (piInstalled)
     {
         if (comp->Enabled)

@@ -44,6 +44,7 @@
 #include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(module);
 
@@ -306,7 +307,7 @@ FARPROC get_proc_address( HMODULE hModule, LPCSTR function )
     return fp;
 }
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 /*
  * Work around a Delphi bug on x86_64.  When delay loading a symbol,
  * Delphi saves rcx, rdx, r8 and r9 to the stack.  It then calls
@@ -344,14 +345,14 @@ __ASM_GLOBAL_FUNC( get_proc_address_wrapper,
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI(".cfi_same_value %rbp\n\t")
                    "ret" )
-#else /* __x86_64__ */
+#else /* __x86_64__ && !__i386_on_x86_64__ */
 
 static inline FARPROC get_proc_address_wrapper( HMODULE module, LPCSTR function )
 {
     return get_proc_address( module, function );
 }
 
-#endif /* __x86_64__ */
+#endif /* __x86_64__ && !__i386_on_x86_64__ */
 
 FARPROC WINAPI GetProcAddress( HMODULE hModule, LPCSTR function )
 {
@@ -428,7 +429,7 @@ static BOOL init_module_iterator(MODULE_ITERATOR *iter, HANDLE process)
         return FALSE;
     }
 
-    if (sizeof(void *) == 8 && iter->wow64)
+    if (wine_is_64bit() && iter->wow64)
     {
         PEB_LDR_DATA32 *ldr_data32_ptr;
         DWORD ldr_data32, first_module;
@@ -474,7 +475,7 @@ static int module_iterator_next(MODULE_ITERATOR *iter)
     if (iter->current == iter->head)
         return 0;
 
-    if (sizeof(void *) == 8 && iter->wow64)
+    if (wine_is_64bit() && iter->wow64)
     {
         LIST_ENTRY32 *entry32 = (LIST_ENTRY32 *)iter->current;
 
@@ -602,7 +603,7 @@ BOOL WINAPI K32EnumProcessModules(HANDLE process, HMODULE *lphModule,
     {
         if (cb >= sizeof(HMODULE))
         {
-            if (sizeof(void *) == 8 && iter.wow64)
+            if (wine_is_64bit() && iter.wow64)
                 *lphModule++ = (HMODULE) (DWORD_PTR)iter.ldr_module32.BaseAddress;
             else
                 *lphModule++ = iter.ldr_module.BaseAddress;
@@ -647,7 +648,7 @@ DWORD WINAPI K32GetModuleBaseNameW(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return 0;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -719,7 +720,7 @@ DWORD WINAPI K32GetModuleFileNameExW(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return 0;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -817,7 +818,7 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return FALSE;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -840,14 +841,14 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
     return TRUE;
 }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /***********************************************************************
  *           __wine_dll_register_16 (KERNEL32.@)
  *
  * No longer used.
  */
-void __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_name )
+void CDECL __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_name )
 {
     ERR( "loading old style 16-bit dll %s no longer supported\n", file_name );
 }
@@ -858,7 +859,7 @@ void __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_na
  *
  * No longer used.
  */
-void __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
+void CDECL __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
 {
 }
 

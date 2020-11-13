@@ -1106,6 +1106,20 @@ static HANDLE start_rundll32( const WCHAR *inf_path, BOOL wow64 )
     lstrcatW( buffer, flags );
     lstrcatW( buffer, inf_path );
 
+    if (1)
+    {
+        /* CROSSOVER HACK bug 7736. Do prefix initialization in the root desktop. */
+        static WCHAR root[] = {'r','o','o','t',0};
+        HDESK desktop;
+
+        desktop = CreateDesktopW(root, NULL, NULL, 0, GENERIC_ALL, NULL);
+        if (desktop)
+        {
+            SetThreadDesktop(desktop);
+            CloseHandle(desktop);
+        }
+    }
+
     if (CreateProcessW( app, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
         CloseHandle( pi.hThread );
     else
@@ -1113,6 +1127,46 @@ static HANDLE start_rundll32( const WCHAR *inf_path, BOOL wow64 )
 
     HeapFree( GetProcessHeap(), 0, buffer );
     return pi.hProcess;
+}
+
+/* ---------------------------------------------------------------
+**   This function is a CrossOver HACK for 9411 / 8979.
+** --------------------------------------------------------------- */
+static char* setup_dll_overrides(void)
+{
+    /* See CXBT.pm for reference */
+    static char overrides[] = "WINEDLLOVERRIDES=shdocvw=b;*iexplore.exe=b;advpack=b;atl=b;oleaut32=b;rpcrt4=b";
+    char* old_dlloverrides, *ret = NULL;
+    HANDLE hFile;
+
+    /* Save the original dll overrides so we can restore them after running
+     * rundll32.
+     */
+    old_dlloverrides = getenv("WINEDLLOVERRIDES");
+    if (old_dlloverrides)
+    {
+        ret = HeapAlloc( GetProcessHeap(), 0, sizeof("WINEDLLOVERRIDES=") + strlen(old_dlloverrides));
+        strcpy(ret, "WINEDLLOVERRIDES=");
+        strcat(ret, old_dlloverrides);
+    }
+
+    /* Check whether shdocvw is usable */
+    hFile = CreateFileA("c:/windows/system32/shdocvw.dll", FILE_READ_DATA,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE)
+    {
+        char buf[0x40+20];
+        if (ReadFile(hFile, buf, sizeof(buf), NULL, NULL))
+        {
+            if (strncmp(buf+0x40, "Wine placeholder DLL", 20) != 0)
+                overrides[8] = 'd';
+        }
+        CloseHandle(hFile);
+    }
+    WINE_TRACE("for rundll32: %s\n", overrides);
+    putenv(overrides);
+    return ret;
 }
 
 static void install_root_pnp_devices(void)
@@ -1234,10 +1288,12 @@ static void update_wineprefix( BOOL force )
     {
         HANDLE process;
         DWORD count = 0;
+        char* old_dlloverrides = setup_dll_overrides();
 
         if ((process = start_rundll32( inf_path, FALSE )))
         {
-            HWND hwnd = show_wait_window();
+            /* HACK: Disable the wait window as it is deemed confusing */
+            HWND hwnd = 1 ? NULL : show_wait_window();
             for (;;)
             {
                 MSG msg;
@@ -1255,6 +1311,11 @@ static void update_wineprefix( BOOL force )
         update_user_profile();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
+        if (old_dlloverrides)
+        {
+            putenv(old_dlloverrides);
+            free(old_dlloverrides);
+        }
     }
 
 done:
@@ -1475,9 +1536,33 @@ int __cdecl main( int argc, char *argv[] )
         ProcessRunKeys( HKEY_LOCAL_MACHINE, RunServicesW, FALSE, FALSE );
         start_services_process();
     }
-    if (init || update) update_wineprefix( update );
+
+    if (end_session || kill || restart) /* CodeWeavers hack: let reboot.exe do the reboot processing */
+    {
+        static const WCHAR rebootW[] = { '\\','r','e','b','o','o','t','.','e','x','e',0 };
+        WCHAR cmdline[MAX_PATH + sizeof(rebootW)/sizeof(WCHAR)];
+        PROCESS_INFORMATION pi;
+        STARTUPINFOW si;
+
+        GetSystemDirectoryW( cmdline, MAX_PATH );
+        lstrcatW( cmdline, rebootW );
+        memset( &si, 0, sizeof si );
+        si.cb = sizeof si;
+        if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
+        {
+            WaitForSingleObject( pi.hProcess, INFINITE );
+            CloseHandle( pi.hProcess );
+            CloseHandle( pi.hThread );
+            goto done;
+        }
+        WINE_ERR("Failed to start reboot\n");
+    }
 
     create_volatile_environment_registry_key();
+
+    if (init || update) update_wineprefix( update );
+
+    goto done;  /* CodeWeavers hack: reboot.exe should have handled these already */
 
     ProcessRunKeys( HKEY_LOCAL_MACHINE, RunOnceW, TRUE, TRUE );
 
@@ -1488,6 +1573,7 @@ int __cdecl main( int argc, char *argv[] )
         ProcessStartupItems();
     }
 
+done:
     WINE_TRACE("Operation done\n");
 
     SetEvent( event );

@@ -82,6 +82,10 @@ static NLSTABLEINFO nls_info;
 static HMODULE kernel32_handle;
 static const union cptable *unix_table; /* NULL if UTF8 */
 
+#ifdef __i386_on_x86_64__
+static NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char * HOSTPTR src, DWORD srclen ) __attribute__((overloadable));
+#endif
+
 static NTSTATUS load_string( ULONG id, LANGID lang, WCHAR *buffer, ULONG len )
 {
     const IMAGE_RESOURCE_DATA_ENTRY *data;
@@ -469,7 +473,7 @@ void init_unix_codepage(void) { }
 
 /* Unix format is: lang[_country][.charset][@modifier]
  * Windows format is: lang[-script][-country][_modifier] */
-static LCID unix_locale_to_lcid( const char *unix_name )
+static LCID unix_locale_to_lcid( const char * HOSTPTR unix_name )
 {
     static const WCHAR sepW[] = {'_','.','@',0};
     static const WCHAR posixW[] = {'P','O','S','I','X',0};
@@ -619,6 +623,78 @@ void init_locale( HMODULE module )
     }
 #endif
 
+    {
+        /* CrossOver hack for bug 15091: locale overrides in the registry. */
+        HANDLE user_key, wine_key;
+        NTSTATUS stat;
+        OBJECT_ATTRIBUTES attr;
+        UNICODE_STRING nameW;
+
+        stat = RtlOpenCurrentUser( KEY_ALL_ACCESS, &user_key );
+        if (stat == STATUS_SUCCESS)
+        {
+            static const WCHAR wineW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e',0};
+            attr.Length = sizeof(attr);
+            attr.RootDirectory = user_key;
+            RtlInitUnicodeString( &nameW, wineW );
+            attr.ObjectName = &nameW;
+            attr.Attributes = 0;
+            attr.SecurityDescriptor = NULL;
+            attr.SecurityQualityOfService = NULL;
+            stat = NtCreateKey( &wine_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL );
+            NtClose( user_key );
+        }
+        if (stat == STATUS_SUCCESS)
+        {
+            static const WCHAR lcallW[] = {'L','C','_','A','L','L',0};
+            static const WCHAR lcctypeW[] = {'L','C','_','C','T','Y','P','E',0};
+            static const WCHAR lcmessagesW[] = {'L','C','_','M','E','S','S','A','G','E','S',0};
+            UNICODE_STRING categorystr;
+            WCHAR bufferW[46];
+            char bufferA[40];
+            const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION*)bufferW;
+            DWORD count;
+
+            RtlInitUnicodeString( &categorystr, lcallW );
+            count = sizeof(bufferW);
+            stat = NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count );
+
+            if (stat == STATUS_SUCCESS)
+            {
+                int ret = ntdll_wcstoumbs( 0, (WCHAR *)info->Data, info->DataLength / sizeof(WCHAR),
+                                           bufferA, ARRAY_SIZE(bufferA), NULL, NULL );
+                bufferA[ret] = 0;
+                system_lcid = unix_locale_to_lcid( bufferA );
+                user_lcid = unix_locale_to_lcid( bufferA );
+            }
+            else
+            {
+                RtlInitUnicodeString( &categorystr, lcctypeW );
+                count = sizeof(bufferW);
+                stat = NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count );
+                if (!stat)
+                {
+                    int ret = ntdll_wcstoumbs( 0, (WCHAR *)info->Data, info->DataLength / sizeof(WCHAR),
+                                               bufferA, ARRAY_SIZE(bufferA), NULL, NULL );
+                    bufferA[ret] = 0;
+                    system_lcid = unix_locale_to_lcid( bufferA );
+                }
+                RtlInitUnicodeString( &categorystr, lcmessagesW );
+                count = sizeof(bufferW);
+                stat = NtQueryValueKey( wine_key, &categorystr, KeyValuePartialInformation, bufferW, count, &count );
+                if (!stat)
+                {
+                    int ret = ntdll_wcstoumbs( 0, (WCHAR *)info->Data, info->DataLength / sizeof(WCHAR),
+                                               bufferA, ARRAY_SIZE(bufferA), NULL, NULL );
+                    bufferA[ret] = 0;
+                    user_lcid = unix_locale_to_lcid( bufferA );
+                }
+            }
+            NtClose( wine_key );
+        }
+    }
+
+
     if (!system_lcid) system_lcid = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
     if (!user_lcid) user_lcid = system_lcid;
 
@@ -634,7 +710,7 @@ void init_locale( HMODULE module )
 /******************************************************************
  *      ntdll_umbstowcs
  */
-int ntdll_umbstowcs( DWORD flags, const char *src, int srclen, WCHAR *dst, int dstlen )
+int ntdll_umbstowcs( DWORD flags, const char * HOSTPTR src, int srclen, WCHAR *dst, int dstlen )
 {
     DWORD reslen;
     NTSTATUS status;
@@ -1320,7 +1396,7 @@ found:
 
 
 /* helper for the various utf8 mbstowcs functions */
-static unsigned int decode_utf8_char( unsigned char ch, const char **str, const char *strend )
+static unsigned int decode_utf8_char( unsigned char ch, const char * HOSTPTR *str, const char * HOSTPTR strend )
 {
     /* number of following bytes in sequence based on first byte value (for bytes above 0x7f) */
     static const char utf8_length[128] =
@@ -1340,7 +1416,7 @@ static unsigned int decode_utf8_char( unsigned char ch, const char **str, const 
 
     unsigned int len = utf8_length[ch - 0x80];
     unsigned int res = ch & utf8_mask[len];
-    const char *end = *str + len;
+    const char * HOSTPTR end = *str + len;
 
     if (end > strend)
     {
@@ -1375,11 +1451,20 @@ static unsigned int decode_utf8_char( unsigned char ch, const char **str, const 
 /**************************************************************************
  *	RtlUTF8ToUnicodeN   (NTDLL.@)
  */
+#ifdef __i386_on_x86_64__
 NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char *src, DWORD srclen )
+{
+    return RtlUTF8ToUnicodeN( dst, dstlen, reslen, (const char * HOSTPTR)src, srclen );
+}
+
+static NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char * HOSTPTR src, DWORD srclen ) __attribute__((overloadable))
+#else
+NTSTATUS WINAPI RtlUTF8ToUnicodeN( WCHAR *dst, DWORD dstlen, DWORD *reslen, const char *src, DWORD srclen )
+#endif
 {
     unsigned int res, len;
     NTSTATUS status = STATUS_SUCCESS;
-    const char *srcend = src + srclen;
+    const char * HOSTPTR srcend = src + srclen;
     WCHAR *dstend;
 
     if (!src) return STATUS_INVALID_PARAMETER_4;

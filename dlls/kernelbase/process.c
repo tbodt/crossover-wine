@@ -26,6 +26,7 @@
 #define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 #include "winnls.h"
 #include "winternl.h"
 
@@ -427,6 +428,58 @@ struct _PROC_THREAD_ATTRIBUTE_LIST
     struct proc_thread_attr attrs[1];
 };
 
+/***********************************************************************
+ *    CROSSOVER HACK: bug 17440 - see more below
+ *           hack_steam_exe
+ */
+static WCHAR * hack_steam_exe(const WCHAR *tidy_cmdline, WCHAR *steam_dir)
+{
+    HKEY key;
+    DWORD res;
+    static const WCHAR allosarchesW[] = {' ','-','a','l','l','o','s','a','r','c','h','e','s',0};
+    static const WCHAR cefforce32bitW[] = {' ','-','c','e','f','-','f','o','r','c','e','-','3','2','b','i','t',0};
+    static const WCHAR enable_keyW[] =
+        {'S','o','f','t','w','a','r','e',
+         '\\','W','i','n','e',
+         '\\','A','p','p','D','e','f','a','u','l','t','s',
+         '\\','s','t','e','a','m','.','e','x','e',
+         '\\','F','o','r','c','e','B','e','t','a',0};
+
+    LPWSTR new_command_line;
+
+    new_command_line = RtlAllocateHeap(GetProcessHeap(), 0,
+        sizeof(WCHAR) * (lstrlenW(tidy_cmdline) + lstrlenW(allosarchesW) + lstrlenW(cefforce32bitW) + 1));
+
+    if (!new_command_line) return NULL;
+
+    wcscpy(new_command_line, tidy_cmdline);
+    lstrcatW(new_command_line, allosarchesW);
+    lstrcatW(new_command_line, cefforce32bitW);
+
+    res = RegOpenKeyExW(HKEY_CURRENT_USER, enable_keyW, 0, KEY_READ, &key);
+    if (res == ERROR_SUCCESS)
+    {
+        HANDLE handle;
+        DWORD bytes_written;
+        static const WCHAR betasuffixW[] = {'p','a','c','k','a','g','e','/','b','e','t','a',0};
+        WCHAR betafile[MAX_PATH];
+        const char *betaversion = "publicbeta";
+
+        RegCloseKey(key);
+        lstrcpyW(betafile, steam_dir);
+        lstrcatW(betafile, betasuffixW);
+        handle = CreateFileW(betafile, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+        if (handle != INVALID_HANDLE_VALUE)
+        {
+            WriteFile(handle, betaversion, strlen(betaversion), &bytes_written, NULL);
+            CloseHandle(handle);
+            TRACE("CrossOver hack writing %s to %s\n", betaversion, debugstr_w(betafile));
+        }
+    }
+
+    return new_command_line;
+}
+
 /**********************************************************************
  *           CreateProcessInternalW   (kernelbase.@)
  */
@@ -465,6 +518,66 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         if (!(tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) ))) return FALSE;
         app_name = name;
     }
+
+    /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
+     * Insert --no-sandbox in command line of Steam's web helper process to
+     * work around problems hooking our ntdll exports.
+     * CROSSOVER HACK: bug 17315
+     * Insert --in-process-gpu in command line of Steam's web helper process to
+     * work around page rendering problems. */
+    {
+        static const WCHAR steamwebhelperexeW[] = {'s','t','e','a','m','w','e','b','h','e','l','p','e','r','.','e','x','e',0};
+        static const WCHAR nosandboxW[] = {' ','-','-','n','o','-','s','a','n','d','b','o','x',0};
+        static const WCHAR inprocessgpuW[] = {' ','-','-','i','n','-','p','r','o','c','e','s','s','-','g','p','u',0};
+
+        if (wcsstr(name, steamwebhelperexeW))
+        {
+            LPWSTR new_command_line;
+
+            new_command_line = RtlAllocateHeap(GetProcessHeap(), 0,
+                sizeof(WCHAR) * (lstrlenW(tidy_cmdline) + lstrlenW(nosandboxW) + lstrlenW(inprocessgpuW) + 1));
+
+            if (!new_command_line) return FALSE;
+
+            wcscpy(new_command_line, tidy_cmdline);
+            lstrcatW(new_command_line, nosandboxW);
+            lstrcatW(new_command_line, inprocessgpuW);
+
+            TRACE("CrossOver hack changing command line to %s\n", debugstr_w(new_command_line));
+
+            if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+            tidy_cmdline = new_command_line;
+        }
+    }
+    /* end CROSSOVER HACK */
+
+    /* CROSSOVER HACK: bug 17440
+     *  On the Mac, we cannot use the 64 bit version of cef because it
+     *  uses registers that conflict.
+     * Valve kindly made a set of options for us to make Steam use 32 bit cef as a workaround.
+     *   So we inject -allosarches -cef-force-32bit to the command line, it works.
+     * A slight wrinkle is that this was only supported in Beta at the time of this writing (5/5/2020)
+     *   so we force the beta client for now.  */
+    {
+        static const WCHAR steamexeW[] = {'s','t','e','a','m','.','e','x','e',0};
+
+        if (wcsstr(name, steamexeW))
+        {
+            WCHAR *new_command_line;
+            WCHAR steam_dir[MAX_PATH];
+
+            lstrcpyW(steam_dir, name);
+            steam_dir[lstrlenW(steam_dir) - lstrlenW(steamexeW)] = 0;
+            new_command_line = hack_steam_exe(tidy_cmdline, steam_dir);
+            if (new_command_line)
+            {
+                TRACE("CrossOver hack changing command line to %s\n", debugstr_w(new_command_line));
+                if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+                tidy_cmdline = new_command_line;
+            }
+        }
+    }
+    /* end CROSSOVER HACK */
 
     /* Warn if unsupported features are used */
 

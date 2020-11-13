@@ -20,6 +20,8 @@
 #ifndef _BASETYPS_H_
 #define _BASETYPS_H_
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 # define EXTERN_C extern "C"
 #else
@@ -86,5 +88,7 @@ typedef unsigned long error_status_t;
 typedef unsigned short wchar_t;
 #define _WCHAR_T_DEFINED
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _BASETYPS_H_ */

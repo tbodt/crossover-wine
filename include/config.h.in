@@ -61,6 +61,9 @@
 /* Define to 1 if you have the `AUGraphAddNode' function. */
 #undef HAVE_AUGRAPHADDNODE
 
+/* Define to 1 if you have the <AVFoundation/AVFoundation.h> header file. */
+#undef HAVE_AVFOUNDATION_AVFOUNDATION_H
+
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -287,6 +290,9 @@
 /* Define to 1 if you have the `if_nameindex' function. */
 #undef HAVE_IF_NAMEINDEX
 
+/* Define to 1 if your compiler supports the -ilocal option. */
+#undef HAVE_ILOCAL
+
 /* Define to 1 if you have the `ilogb' function. */
 #undef HAVE_ILOGB
 
@@ -319,6 +325,12 @@
 
 /* Define to 1 if you have the <IOKit/IOKitLib.h> header file. */
 #undef HAVE_IOKIT_IOKITLIB_H
+
+/* Define to 1 if you have the <IOKit/usb/IOUSBLib.h> header file. */
+#undef HAVE_IOKIT_USB_IOUSBLIB_H
+
+/* Define to 1 if you have the `IOServiceMatching' function. */
+#undef HAVE_IOSERVICEMATCHING
 
 /* Define to 1 if you have the `isfinite' function. */
 #undef HAVE_ISFINITE
@@ -710,6 +722,9 @@
 /* Define if we can use ppdev.h for parallel port access */
 #undef HAVE_PPDEV
 
+/* Define to 1 if you have the `ppoll' function. */
+#undef HAVE_PPOLL
+
 /* Define to 1 if you have the `prctl' function. */
 #undef HAVE_PRCTL
 
@@ -820,6 +835,9 @@
 
 /* Define to 1 if `interface_id' is a member of `sg_io_hdr_t'. */
 #undef HAVE_SG_IO_HDR_T_INTERFACE_ID
+
+/* Define to 1 if you have the `shm_open' function. */
+#undef HAVE_SHM_OPEN
 
 /* Define if sigaddset is supported */
 #undef HAVE_SIGADDSET
@@ -1023,6 +1041,9 @@
 
 /* Define to 1 if you have the <sys/epoll.h> header file. */
 #undef HAVE_SYS_EPOLL_H
+
+/* Define to 1 if you have the <sys/eventfd.h> header file. */
+#undef HAVE_SYS_EVENTFD_H
 
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H

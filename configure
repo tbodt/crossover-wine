@@ -717,6 +717,8 @@ PRELINK
 WINELOADER_DEPENDS
 LIBWINE_LDFLAGS
 LIBWINE_SHAREDLIB
+LIBWINE_NAME
+AVFOUNDATION_LIBS
 METAL_LIBS
 CARBON_LIBS
 QUICKTIME_LIBS
@@ -773,7 +775,10 @@ AR
 BISON
 FLEX
 TOOLSDIR
+MODULECFLAGS
+WIDLFLAGS
 TARGETFLAGS
+HOSTSTACK_CFLAGS
 LD
 CPPBIN
 ac_ct_CXX
@@ -814,7 +819,6 @@ infodir
 docdir
 oldincludedir
 includedir
-runstatedir
 localstatedir
 sharedstatedir
 sysconfdir
@@ -839,6 +843,7 @@ ac_user_opts='
 enable_option_checking
 enable_win16
 enable_win64
+enable_win32on64
 enable_tests
 enable_maintainer_mode
 with_alsa
@@ -1239,6 +1244,7 @@ enable_dhtmled_ocx
 enable_difxapi
 enable_dinput
 enable_dinput8
+enable_directmanipulation
 enable_dispex
 enable_dmband
 enable_dmcompos
@@ -1354,7 +1360,9 @@ enable_httpapi
 enable_iccvid
 enable_icmp
 enable_ieframe
+enable_ieinfo5_ocx
 enable_ieproxy
+enable_iernonce
 enable_imaadp32_acm
 enable_imagehlp
 enable_imm32
@@ -1663,6 +1671,7 @@ enable_wmp
 enable_wmphoto
 enable_wmvcore
 enable_wnaspi32
+enable_wow64cpu
 enable_wpc
 enable_wpcap
 enable_ws2_32
@@ -1933,7 +1942,6 @@ datadir='${datarootdir}'
 sysconfdir='${prefix}/etc'
 sharedstatedir='${prefix}/com'
 localstatedir='${prefix}/var'
-runstatedir='${localstatedir}/run'
 includedir='${prefix}/include'
 oldincludedir='/usr/include'
 docdir='${datarootdir}/doc/${PACKAGE_TARNAME}'
@@ -2186,15 +2194,6 @@ do
   | -silent | --silent | --silen | --sile | --sil)
     silent=yes ;;
 
-  -runstatedir | --runstatedir | --runstatedi | --runstated \
-  | --runstate | --runstat | --runsta | --runst | --runs \
-  | --run | --ru | --r)
-    ac_prev=runstatedir ;;
-  -runstatedir=* | --runstatedir=* | --runstatedi=* | --runstated=* \
-  | --runstate=* | --runstat=* | --runsta=* | --runst=* | --runs=* \
-  | --run=* | --ru=* | --r=*)
-    runstatedir=$ac_optarg ;;
-
   -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
     ac_prev=sbindir ;;
   -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
@@ -2332,7 +2331,7 @@ fi
 for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
 		datadir sysconfdir sharedstatedir localstatedir includedir \
 		oldincludedir docdir infodir htmldir dvidir pdfdir psdir \
-		libdir localedir mandir runstatedir
+		libdir localedir mandir
 do
   eval ac_val=\$$ac_var
   # Remove trailing slashes.
@@ -2485,7 +2484,6 @@ Fine tuning of the installation directories:
   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
   --sharedstatedir=DIR    modifiable architecture-independent data [PREFIX/com]
   --localstatedir=DIR     modifiable single-machine data [PREFIX/var]
-  --runstatedir=DIR       modifiable per-process data [LOCALSTATEDIR/run]
   --libdir=DIR            object code libraries [EPREFIX/lib]
   --includedir=DIR        C header files [PREFIX/include]
   --oldincludedir=DIR     C header files for non-gcc [/usr/include]
@@ -2526,6 +2524,7 @@ Optional Features:
   --disable-win16         do not include Win16 support
   --enable-win64          build a Win64 emulator on AMD64 (won't run Win32
                           binaries)
+  --enable-win32on64      build a Win32 emulator on AMD64
   --disable-tests         do not build the regression tests
   --enable-maintainer-mode
                           enable maintainer-specific build rules
@@ -3841,6 +3840,11 @@ fi
 # Check whether --enable-win64 was given.
 if test "${enable_win64+set}" = set; then :
   enableval=$enable_win64;
+fi
+
+# Check whether --enable-win32on64 was given.
+if test "${enable_win32on64+set}" = set; then :
+  enableval=$enable_win32on64;
 fi
 
 # Check whether --enable-tests was given.
@@ -5564,6 +5568,35 @@ else
 fi
 
 
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -ilocal include" >&5
+$as_echo_n "checking whether the compiler supports -ilocal include... " >&6; }
+if ${ac_cv_cflags__ilocal_include+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -ilocal include"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__ilocal_include=yes
+else
+  ac_cv_cflags__ilocal_include=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__ilocal_include" >&5
+$as_echo "$ac_cv_cflags__ilocal_include" >&6; }
+if test "x$ac_cv_cflags__ilocal_include" = xyes; then :
+
+$as_echo "#define HAVE_ILOCAL 1" >>confdefs.h
+
+fi
+
 case $host in
   *-darwin*)
     with_fontconfig=${with_fontconfig:-no}
@@ -5575,14 +5608,16 @@ case $host in
     ;;
 esac
 
+HOSTSTACK_CFLAGS=""
+
+
 case $host in
   x86_64*|amd64*)
-    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
+    if test "x$enable_win64" != "xyes" -a "x$enable_win32on64" != "xyes" -a "$cross_compiling" != "yes"
     then
       CC="$CC -m32"
       CXX="$CXX -m32"
-
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC works" >&5
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC works" >&5
 $as_echo_n "checking whether $CC works... " >&6; }
 if ${wine_cv_cc_m32+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -5613,10 +5648,57 @@ $as_echo "$wine_cv_cc_m32" >&6; }
       notice_platform="32-bit "
       TARGETFLAGS="-m32"
 
+      WIDLFLAGS="-m32"
+
       PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib32/pkgconfig:/usr/lib/pkgconfig}
       export PKG_CONFIG_PATH
       enable_win16=${enable_win16:-yes}
       with_unwind=${with_unwind:-no}
+    elif test "x$enable_win64" != "xyes" -a "x$enable_win32on64" = "xyes" -a "$cross_compiling" != "yes"
+    then
+      if test "x${GCC}" = "xyes"
+      then
+        { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC supports __builtin_ms_va_list" >&5
+$as_echo_n "checking whether $CC supports __builtin_ms_va_list... " >&6; }
+if ${wine_cv_builtin_ms_va_list+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <stdarg.h>
+int
+main ()
+{
+void func(__builtin_ms_va_list *args);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  wine_cv_builtin_ms_va_list=yes
+else
+  wine_cv_builtin_ms_va_list=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $wine_cv_builtin_ms_va_list" >&5
+$as_echo "$wine_cv_builtin_ms_va_list" >&6; }
+        test $wine_cv_builtin_ms_va_list != no || as_fn_error $? "You need gcc >= 4.4 or clang >= 3.8 to build Wine as 64-bit." "$LINENO" 5
+        if test "x$ac_cv_cflags__ilocal_include" = xno; then :
+  as_fn_error $? "You need a version of clang that supports -ilocal to build Wine for 32on64." "$LINENO" 5
+fi
+      fi
+      CC="$CC -mwine32 -mstorage-address-space=default -minterop64-32-thunk-prefix=wine -minterop64-32-cs32-name=wine_32on64_cs32 -minterop64-32-cs64-name=wine_32on64_cs64 -mstack64"
+      CXX="$CXX -mwine32 -mstorage-address-space=default -minterop64-32-thunk-prefix=wine -minterop64-32-cs32-name=wine_32on64_cs32 -minterop64-32-cs64-name=wine_32on64_cs64 -mstack64"
+      HOSTSTACK_CFLAGS="$HOSTSTACK_CFLAGS -mstack64"
+      MODULECFLAGS="-mdefault-address-space=ptr32 -mstorage-address-space=ptr32 -mno-stack64"
+
+      host_cpu="x86_32on64"
+      notice_platform="64-bit "
+      TARGETFLAGS="-mwine32"
+
+      WIDLFLAGS="-m32"
+
     else
       if test "x${GCC}" = "xyes"
       then
@@ -5652,6 +5734,8 @@ $as_echo "$wine_cv_builtin_ms_va_list" >&6; }
       host_cpu="x86_64"
       notice_platform="64-bit "
       TARGETFLAGS="-m64"
+
+      WIDLFLAGS="-m64"
 
     fi
     ;;
@@ -5732,6 +5816,8 @@ $as_echo "$wine_cv_float_abi" >&6; }
     CFLAGS="$CFLAGS -marm -mfloat-abi=$float_abi"
     TARGETFLAGS="-marm -mfloat-abi=$float_abi"
 
+    WIDLFLAGS="-marm -mfloat-abi=$float_abi"
+
     ;;
   aarch64*)
     { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC supports __builtin_ms_va_list" >&5
@@ -5769,6 +5855,7 @@ esac
 
 enable_win16=${enable_win16:-no}
 enable_win64=${enable_win64:-no}
+enable_win32on64=${enable_win32on64:-no}
 
 enable_winetest=${enable_winetest:-$enable_tests}
 
@@ -5776,7 +5863,14 @@ if test "x$enable_win64" = "xyes"
 then
     test -z "$with_wine64" || as_fn_error $? "--enable-win64 and --with-wine64 are mutually exclusive.
 --enable-win64 should be used in the 64-bit build tree, --with-wine64 in the 32-bit Wow64 build tree." "$LINENO" 5
+    test "x$enable_win32on64" != "xyes" || as_fn_error $? "--enable-win64 and --enable-win32on64 are mutually exclusive.
+--enable-win64 should be used in the 64-bit build tree, --enable-win32on64 in the 32-bit Wow64 build tree." "$LINENO" 5
     test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib64"
+fi
+
+if test "x$enable_win32on64" = "xyes"
+then
+    test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32on64"
 fi
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for the directory containing the Wine tools" >&5
@@ -5815,6 +5909,8 @@ fi
 if test -n "$host_alias" -a "$host_alias" != "$build_alias"
 then
     TARGETFLAGS="-b $host_alias $TARGETFLAGS"
+
+    WIDLFLAGS="-b $host_alias $WIDLFLAGS"
 
 fi
 
@@ -6899,7 +6995,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -6945,7 +7041,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -6969,7 +7065,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7014,7 +7110,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7038,7 +7134,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
+#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -7357,6 +7453,7 @@ for ac_header in \
 	EGL/egl.h \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
+	IOKit/usb/IOUSBLib.h \
 	OpenAL/al.h \
 	OpenCL/opencl.h \
 	QuickTime/ImageCompression.h \
@@ -7430,6 +7527,7 @@ for ac_header in \
 	sys/elf32.h \
 	sys/epoll.h \
 	sys/event.h \
+	sys/eventfd.h \
 	sys/exec_elf.h \
 	sys/filio.h \
 	sys/ioctl.h \
@@ -8101,6 +8199,7 @@ wine_fn_config_symlink ()
 }
 
 wine_binary="wine"
+test "x$enable_win32on64" != "xyes" || wine_binary="wine32on64"
 test "x$enable_win64" != "xyes" || wine_binary="wine64"
 WINELOADER_PROGRAMS="$wine_binary"
 
@@ -8608,7 +8707,19 @@ ac_link='$OBJC -o conftest$ac_exeext $OBJCFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_
 ac_compiler_gnu=$ac_cv_objc_compiler_gnu
 
 
-for ac_header in Metal/Metal.h
+for ac_header in AVFoundation/AVFoundation.h
+do :
+  ac_fn_objc_check_header_mongrel "$LINENO" "AVFoundation/AVFoundation.h" "ac_cv_header_AVFoundation_AVFoundation_h" "$ac_includes_default"
+if test "x$ac_cv_header_AVFoundation_AVFoundation_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_AVFOUNDATION_AVFOUNDATION_H 1
+_ACEOF
+
+fi
+
+done
+
+        for ac_header in Metal/Metal.h
 do :
   ac_fn_objc_check_header_mongrel "$LINENO" "Metal/Metal.h" "ac_cv_header_Metal_Metal_h" "$ac_includes_default"
 if test "x$ac_cv_header_Metal_Metal_h" = xyes; then :
@@ -8645,10 +8756,15 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
     SYSTEMCONFIGURATION_LIBS="-framework SystemConfiguration"
 
+    libwine_tag=""
 
     WINELOADER_LDFLAGS="-Wl,-pie,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
 
     wine_can_build_preloader=yes
+    preloader_needs_mmacosx_version_min=no
+    if xcodebuild -version | egrep -qs 'Xcode 9(\D|$)' ; then
+        preloader_needs_mmacosx_version_min=yes
+    fi
     WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7c400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
     { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-no_new_main -e _main" >&5
 $as_echo_n "checking whether the compiler supports -Wl,-no_new_main -e _main... " >&6; }
@@ -8722,7 +8838,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&5
 $as_echo "$ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&6; }
 if test "x$ac_cv_cflags__Wl__no_new_main__e__main__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" = xyes; then :
-  WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
+  preloader_needs_mmacosx_version_min=yes
 else
   wine_can_build_preloader=no
 fi
@@ -8776,7 +8892,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&5
 $as_echo "$ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" >&6; }
 if test "x$ac_cv_cflags__mmacosx_version_min_10_7__nostartfiles__nodefaultlibs" = xyes; then :
-  WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
+  preloader_needs_mmacosx_version_min=yes
 else
   wine_can_build_preloader=no
 fi
@@ -8784,6 +8900,10 @@ fi
 fi
     if test "$wine_can_build_preloader" = "yes"
     then
+        if test "$preloader_needs_mmacosx_version_min" = "yes"
+        then
+            WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
+        fi
         { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-no_pie" >&5
 $as_echo_n "checking whether the compiler supports -Wl,-no_pie... " >&6; }
 if ${ac_cv_cflags__Wl__no_pie+:} false; then :
@@ -8813,6 +8933,11 @@ fi
         WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
     else
         as_fn_append wine_warnings "|can't build Wine preloader; many programs won't work"
+    fi
+    if test "$host_cpu" = "x86_32on64"
+    then
+        WINEPRELOADER_LDFLAGS="$WINEPRELOADER_LDFLAGS -Wl,-stack_size,0x04000000,-stack_addr,0xc0000000"
+        libwine_tag="32on64"
     fi
 
     if test "$ac_cv_header_DiskArbitration_DiskArbitration_h" = "yes"
@@ -8899,6 +9024,23 @@ done
 
         LIBS="$ac_save_LIBS"
     fi
+    if test "$ac_cv_header_IOKit_usb_IOUSBLib_h" = "yes"
+    then
+        ac_save_LIBS="$LIBS"
+        LIBS="$LIBS $IOKIT_LIBS"
+        for ac_func in IOServiceMatching
+do :
+  ac_fn_c_check_func "$LINENO" "IOServiceMatching" "ac_cv_func_IOServiceMatching"
+if test "x$ac_cv_func_IOServiceMatching" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_IOSERVICEMATCHING 1
+_ACEOF
+
+fi
+done
+
+        LIBS="$ac_save_LIBS"
+    fi
     if test "$ac_cv_header_QuickTime_ImageCompression_h" = "yes"
     then
                 ac_save_LIBS="$LIBS"
@@ -8943,6 +9085,11 @@ rm -f core conftest.err conftest.$ac_objext \
     if test "$ac_cv_header_Metal_Metal_h" = "yes"
     then
         METAL_LIBS="-framework Metal -framework QuartzCore"
+
+    fi
+    if test "$ac_cv_header_AVFoundation_AVFoundation_h" = "yes"
+    then
+        AVFOUNDATION_LIBS="-framework AVFoundation"
 
     fi
 
@@ -9037,14 +9184,20 @@ fi
 
     fi
 
-    LIBWINE_SHAREDLIB="libwine.$libwine_version.dylib"
+    LIBWINE_NAME="wine$libwine_tag"
 
-    LIBWINE_LDFLAGS="-dynamiclib -install_name @rpath/libwine.$libwine_soversion.dylib -Wl,-rpath,@loader_path/ -compatibility_version $libwine_soversion -current_version $libwine_version"
+    LIBWINE_SHAREDLIB="lib$LIBWINE_NAME.$libwine_version.dylib"
 
+    LIBWINE_LDFLAGS="-dynamiclib -install_name @rpath/lib$LIBWINE_NAME.$libwine_soversion.dylib -Wl,-rpath,@loader_path/ -compatibility_version $libwine_soversion -current_version $libwine_version"
+
+        if test "$host_cpu" = "x86_32on64"
+    then
+        LIBWINE_LDFLAGS="$LIBWINE_LDFLAGS  -Wl,-rpath,@loader_path/../lib64"
+    fi
     WINELOADER_DEPENDS="wine_info.plist"
 
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.$libwine_version.dylib libs/wine/libwine.$libwine_soversion.dylib"
-    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/libwine.dylib"
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.$libwine_version.dylib libs/wine/lib$LIBWINE_NAME.$libwine_soversion.dylib"
+    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/lib$LIBWINE_NAME.dylib"
     ;;
 
   linux-android*)
@@ -9161,11 +9314,13 @@ if test "x$ac_cv_cflags__Wl___enable_new_dtags" = xyes; then :
   LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"
 fi
 
-    LIBWINE_SHAREDLIB="libwine.so"
+    LIBWINE_NAME="wine"
 
-    LIBWINE_LDFLAGS="-shared -Wl,-soname,libwine.so"
+    LIBWINE_SHAREDLIB="lib$LIBWINE_NAME.so"
 
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.so"
+    LIBWINE_LDFLAGS="-shared -Wl,-soname,lib$LIBWINE_NAME.so"
+
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.so"
 
     { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -lEGL" >&5
 $as_echo_n "checking for -lEGL... " >&6; }
@@ -9325,6 +9480,8 @@ fi
 fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_c_dll_gnuelf" >&5
 $as_echo "$ac_cv_c_dll_gnuelf" >&6; }
+    LIBWINE_NAME="wine"
+
     if test "$ac_cv_c_dll_gnuelf" = "yes"
     then
       LIBWINE_LDFLAGS="-shared"
@@ -9351,7 +9508,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__shared__Wl__soname_confest_so_1" >&5
 $as_echo "$ac_cv_cflags__shared__Wl__soname_confest_so_1" >&6; }
 if test "x$ac_cv_cflags__shared__Wl__soname_confest_so_1" = xyes; then :
-  LIBWINE_LDFLAGS="-shared -Wl,-soname,libwine.so.$libwine_soversion"
+  LIBWINE_LDFLAGS="-shared -Wl,-soname,lib$LIBWINE_NAME.so.$libwine_soversion"
 else
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -shared -Wl,-h,confest.so.1" >&5
 $as_echo_n "checking whether the compiler supports -shared -Wl,-h,confest.so.1... " >&6; }
@@ -9376,7 +9533,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__shared__Wl__h_confest_so_1" >&5
 $as_echo "$ac_cv_cflags__shared__Wl__h_confest_so_1" >&6; }
 if test "x$ac_cv_cflags__shared__Wl__h_confest_so_1" = xyes; then :
-  LIBWINE_LDFLAGS="-shared -Wl,-h,libwine.so.$libwine_soversion"
+  LIBWINE_LDFLAGS="-shared -Wl,-h,lib$LIBWINE_NAME.so.$libwine_soversion"
 fi
 fi
 
@@ -9681,15 +9838,15 @@ fi
 $as_echo "$ac_cv_c_dll_unixware" >&6; }
       if test "$ac_cv_c_dll_unixware" = "yes"
       then
-        LIBWINE_LDFLAGS="-Wl,-G,-h,libwine.so.$libwine_soversion"
+        LIBWINE_LDFLAGS="-Wl,-G,-h,lib$LIBWINE_NAME.so.$libwine_soversion"
       fi
     fi
-    LIBWINE_SHAREDLIB="libwine.so.$libwine_version"
+    LIBWINE_SHAREDLIB="lib$LIBWINE_NAME.so.$libwine_version"
 
     LIBWINE_DEPENDS="wine.map"
 
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.so.$libwine_version libs/wine/libwine.so.$libwine_soversion"
-    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/libwine.so"
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.so.$libwine_version libs/wine/lib$LIBWINE_NAME.so.$libwine_soversion"
+    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/lib$LIBWINE_NAME.so"
     ;;
 esac
 
@@ -9697,7 +9854,6 @@ enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-no}
 enable_wineqtdecoder=${enable_wineqtdecoder:-no}
 enable_wineandroid_drv=${enable_wineandroid_drv:-no}
 enable_winemac_drv=${enable_winemac_drv:-no}
-test "$ac_cv_header_linux_joystick_h" = "yes" -o "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes" || enable_winejoystick_drv=${enable_winejoystick_drv:-no}
 
 CROSSTARGET=""
 
@@ -9709,7 +9865,7 @@ then
     ac_prefix_list="aarch64-w64-mingw32-clang aarch64-w64-mingw32-gcc" ;;
   arm*)
     ac_prefix_list="armv7-w64-mingw32-clang armv7-w64-mingw32-gcc" ;;
-  i[3456789]86*)
+  i[3456789]86*|x86_32on64)
     ac_prefix_list="i686-w64-mingw32-gcc i586-w64-mingw32-gcc i486-w64-mingw32-gcc i386-w64-mingw32-gcc i686-pc-mingw32-gcc i586-pc-mingw32-gcc i486-pc-mingw32-gcc i386-pc-mingw32-gcc i686-mingw32msvc-gcc i586-mingw32msvc-gcc i486-mingw32msvc-gcc i386-mingw32msvc-gcc i686-mingw32-gcc i586-mingw32-gcc i486-mingw32-gcc i386-mingw32-gcc
                      i686-w64-mingw32-clang i586-w64-mingw32-clang i486-w64-mingw32-clang i386-w64-mingw32-clang
                      mingw32-gcc" ;;
@@ -10312,7 +10468,7 @@ if test "x$ac_cv_crosscflags__Wincompatible_library_redeclaration" = xyes; then 
 fi
 
         case $host_cpu in
-          *i[3456789]86*) { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the cross-compiler supports -fno-omit-frame-pointer" >&5
+          *i[3456789]86*|x86_32on64) { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the cross-compiler supports -fno-omit-frame-pointer" >&5
 $as_echo_n "checking whether the cross-compiler supports -fno-omit-frame-pointer... " >&6; }
 if ${ac_cv_crosscflags__fno_omit_frame_pointer+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -17522,7 +17678,7 @@ $as_echo "$ac_cv_cflags__fno_omit_frame_pointer" >&6; }
 if test "x$ac_cv_cflags__fno_omit_frame_pointer" = xyes; then :
   EXTRACFLAGS="$EXTRACFLAGS -fno-omit-frame-pointer"
 fi ;;
-    *x86_64*)
+    *x86_64*|x86_32on64)
       case $host_os in
                 cygwin*|mingw32*) { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wno-format" >&5
 $as_echo_n "checking whether the compiler supports -Wno-format... " >&6; }
@@ -17605,6 +17761,335 @@ fi
 $as_echo "$ac_cv_cflags__Werror" >&6; }
 if test "x$ac_cv_cflags__Werror" = xyes; then :
   EXTRACFLAGS="$EXTRACFLAGS -Werror"
+fi
+  fi
+
+    if test "x$enable_win64" != "xyes" -a "x$enable_win32on64" = "xyes" -a "$cross_compiling" != "yes"
+  then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=extra-tokens" >&5
+$as_echo_n "checking whether the compiler supports -Werror=extra-tokens... " >&6; }
+if ${ac_cv_cflags__Werror_extra_tokens+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=extra-tokens"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_extra_tokens=yes
+else
+  ac_cv_cflags__Werror_extra_tokens=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_extra_tokens" >&5
+$as_echo "$ac_cv_cflags__Werror_extra_tokens" >&6; }
+if test "x$ac_cv_cflags__Werror_extra_tokens" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=extra-tokens"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=implicit-function-declaration" >&5
+$as_echo_n "checking whether the compiler supports -Werror=implicit-function-declaration... " >&6; }
+if ${ac_cv_cflags__Werror_implicit_function_declaration+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=implicit-function-declaration"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_implicit_function_declaration=yes
+else
+  ac_cv_cflags__Werror_implicit_function_declaration=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_implicit_function_declaration" >&5
+$as_echo "$ac_cv_cflags__Werror_implicit_function_declaration" >&6; }
+if test "x$ac_cv_cflags__Werror_implicit_function_declaration" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=implicit-function-declaration"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=incompatible-function-pointer-types" >&5
+$as_echo_n "checking whether the compiler supports -Werror=incompatible-function-pointer-types... " >&6; }
+if ${ac_cv_cflags__Werror_incompatible_function_pointer_types+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=incompatible-function-pointer-types"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_incompatible_function_pointer_types=yes
+else
+  ac_cv_cflags__Werror_incompatible_function_pointer_types=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_incompatible_function_pointer_types" >&5
+$as_echo "$ac_cv_cflags__Werror_incompatible_function_pointer_types" >&6; }
+if test "x$ac_cv_cflags__Werror_incompatible_function_pointer_types" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-function-pointer-types"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=incompatible-pointer-types-discards-qualifiers" >&5
+$as_echo_n "checking whether the compiler supports -Werror=incompatible-pointer-types-discards-qualifiers... " >&6; }
+if ${ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=incompatible-pointer-types-discards-qualifiers"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers=yes
+else
+  ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers" >&5
+$as_echo "$ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers" >&6; }
+if test "x$ac_cv_cflags__Werror_incompatible_pointer_types_discards_qualifiers" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-pointer-types-discards-qualifiers"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=incompatible-pointer-types" >&5
+$as_echo_n "checking whether the compiler supports -Werror=incompatible-pointer-types... " >&6; }
+if ${ac_cv_cflags__Werror_incompatible_pointer_types+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=incompatible-pointer-types"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_incompatible_pointer_types=yes
+else
+  ac_cv_cflags__Werror_incompatible_pointer_types=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_incompatible_pointer_types" >&5
+$as_echo "$ac_cv_cflags__Werror_incompatible_pointer_types" >&6; }
+if test "x$ac_cv_cflags__Werror_incompatible_pointer_types" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-pointer-types"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=pointer-to-int-cast-truncates" >&5
+$as_echo_n "checking whether the compiler supports -Werror=pointer-to-int-cast-truncates... " >&6; }
+if ${ac_cv_cflags__Werror_pointer_to_int_cast_truncates+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=pointer-to-int-cast-truncates"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_pointer_to_int_cast_truncates=yes
+else
+  ac_cv_cflags__Werror_pointer_to_int_cast_truncates=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_pointer_to_int_cast_truncates" >&5
+$as_echo "$ac_cv_cflags__Werror_pointer_to_int_cast_truncates" >&6; }
+if test "x$ac_cv_cflags__Werror_pointer_to_int_cast_truncates" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-to-int-cast-truncates"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=pointer-to-int-cast" >&5
+$as_echo_n "checking whether the compiler supports -Werror=pointer-to-int-cast... " >&6; }
+if ${ac_cv_cflags__Werror_pointer_to_int_cast+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=pointer-to-int-cast"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_pointer_to_int_cast=yes
+else
+  ac_cv_cflags__Werror_pointer_to_int_cast=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_pointer_to_int_cast" >&5
+$as_echo "$ac_cv_cflags__Werror_pointer_to_int_cast" >&6; }
+if test "x$ac_cv_cflags__Werror_pointer_to_int_cast" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-to-int-cast"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=int-to-pointer-cast-truncates" >&5
+$as_echo_n "checking whether the compiler supports -Werror=int-to-pointer-cast-truncates... " >&6; }
+if ${ac_cv_cflags__Werror_int_to_pointer_cast_truncates+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=int-to-pointer-cast-truncates"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_int_to_pointer_cast_truncates=yes
+else
+  ac_cv_cflags__Werror_int_to_pointer_cast_truncates=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_int_to_pointer_cast_truncates" >&5
+$as_echo "$ac_cv_cflags__Werror_int_to_pointer_cast_truncates" >&6; }
+if test "x$ac_cv_cflags__Werror_int_to_pointer_cast_truncates" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=int-to-pointer-cast-truncates"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=out-of-scope-function" >&5
+$as_echo_n "checking whether the compiler supports -Werror=out-of-scope-function... " >&6; }
+if ${ac_cv_cflags__Werror_out_of_scope_function+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=out-of-scope-function"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_out_of_scope_function=yes
+else
+  ac_cv_cflags__Werror_out_of_scope_function=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_out_of_scope_function" >&5
+$as_echo "$ac_cv_cflags__Werror_out_of_scope_function" >&6; }
+if test "x$ac_cv_cflags__Werror_out_of_scope_function" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=out-of-scope-function"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=pointer-arith" >&5
+$as_echo_n "checking whether the compiler supports -Werror=pointer-arith... " >&6; }
+if ${ac_cv_cflags__Werror_pointer_arith+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=pointer-arith"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_pointer_arith=yes
+else
+  ac_cv_cflags__Werror_pointer_arith=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_pointer_arith" >&5
+$as_echo "$ac_cv_cflags__Werror_pointer_arith" >&6; }
+if test "x$ac_cv_cflags__Werror_pointer_arith" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-arith"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=pointer-type-mismatch" >&5
+$as_echo_n "checking whether the compiler supports -Werror=pointer-type-mismatch... " >&6; }
+if ${ac_cv_cflags__Werror_pointer_type_mismatch+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=pointer-type-mismatch"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_pointer_type_mismatch=yes
+else
+  ac_cv_cflags__Werror_pointer_type_mismatch=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_pointer_type_mismatch" >&5
+$as_echo "$ac_cv_cflags__Werror_pointer_type_mismatch" >&6; }
+if test "x$ac_cv_cflags__Werror_pointer_type_mismatch" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-type-mismatch"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=strict-prototypes" >&5
+$as_echo_n "checking whether the compiler supports -Werror=strict-prototypes... " >&6; }
+if ${ac_cv_cflags__Werror_strict_prototypes+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=strict-prototypes"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_strict_prototypes=yes
+else
+  ac_cv_cflags__Werror_strict_prototypes=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_strict_prototypes" >&5
+$as_echo "$ac_cv_cflags__Werror_strict_prototypes" >&6; }
+if test "x$ac_cv_cflags__Werror_strict_prototypes" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=strict-prototypes"
+fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Werror=tautological-constant-out-of-range-compare" >&5
+$as_echo_n "checking whether the compiler supports -Werror=tautological-constant-out-of-range-compare... " >&6; }
+if ${ac_cv_cflags__Werror_tautological_constant_out_of_range_compare+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_wine_try_cflags_saved=$CFLAGS
+CFLAGS="$CFLAGS -Werror=tautological-constant-out-of-range-compare"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+int main(int argc, char **argv) { return 0; }
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_cflags__Werror_tautological_constant_out_of_range_compare=yes
+else
+  ac_cv_cflags__Werror_tautological_constant_out_of_range_compare=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+CFLAGS=$ac_wine_try_cflags_saved
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__Werror_tautological_constant_out_of_range_compare" >&5
+$as_echo "$ac_cv_cflags__Werror_tautological_constant_out_of_range_compare" >&6; }
+if test "x$ac_cv_cflags__Werror_tautological_constant_out_of_range_compare" = xyes; then :
+  EXTRACFLAGS="$EXTRACFLAGS -Werror=tautological-constant-out-of-range-compare"
 fi
   fi
 fi
@@ -17724,6 +18209,7 @@ for ac_func in \
 	pipe2 \
 	poll \
 	port_create \
+	ppoll \
 	prctl \
 	pread \
 	proc_pidinfo \
@@ -18127,6 +18613,69 @@ fi
     LIBS=$ac_save_LIBS
     ;;
 esac
+
+ac_save_LIBS=$LIBS
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing shm_open" >&5
+$as_echo_n "checking for library containing shm_open... " >&6; }
+if ${ac_cv_search_shm_open+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_func_search_save_LIBS=$LIBS
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char shm_open ();
+int
+main ()
+{
+return shm_open ();
+  ;
+  return 0;
+}
+_ACEOF
+for ac_lib in '' rt; do
+  if test -z "$ac_lib"; then
+    ac_res="none required"
+  else
+    ac_res=-l$ac_lib
+    LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
+  fi
+  if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_search_shm_open=$ac_res
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext
+  if ${ac_cv_search_shm_open+:} false; then :
+  break
+fi
+done
+if ${ac_cv_search_shm_open+:} false; then :
+
+else
+  ac_cv_search_shm_open=no
+fi
+rm conftest.$ac_ext
+LIBS=$ac_func_search_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_shm_open" >&5
+$as_echo "$ac_cv_search_shm_open" >&6; }
+ac_res=$ac_cv_search_shm_open
+if test "$ac_res" != no; then :
+  test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
+
+$as_echo "#define HAVE_SHM_OPEN 1" >>confdefs.h
+
+                test "$ac_res" = "none required" || RT_LIBS="$ac_res"
+
+fi
+
+LIBS=$ac_save_LIBS
 
 if test "x$with_ldap" != "xno"
 then
@@ -19668,6 +20217,32 @@ if test "x$ac_cv_cpp_def___x86_64__" = xyes; then :
   CFLAGS="$CFLAGS -D__x86_64__"
   LINTFLAGS="$LINTFLAGS -D__x86_64__"
 fi ;;
+  *x86_32on64*)     { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether we need to define __i386_on_x86_64__" >&5
+$as_echo_n "checking whether we need to define __i386_on_x86_64__... " >&6; }
+if ${ac_cv_cpp_def___i386_on_x86_64__+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#ifndef __i386_on_x86_64__
+yes
+#endif
+_ACEOF
+if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
+  $EGREP "yes" >/dev/null 2>&1; then :
+  ac_cv_cpp_def___i386_on_x86_64__=yes
+else
+  ac_cv_cpp_def___i386_on_x86_64__=no
+fi
+rm -f conftest*
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cpp_def___i386_on_x86_64__" >&5
+$as_echo "$ac_cv_cpp_def___i386_on_x86_64__" >&6; }
+if test "x$ac_cv_cpp_def___i386_on_x86_64__" = xyes; then :
+  CFLAGS="$CFLAGS -D__i386_on_x86_64__"
+  LINTFLAGS="$LINTFLAGS -D__i386_on_x86_64__"
+fi ;;
   *sparc64*)        { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether we need to define __sparc64__" >&5
 $as_echo_n "checking whether we need to define __sparc64__... " >&6; }
 if ${ac_cv_cpp_def___sparc64__+:} false; then :
@@ -19863,7 +20438,8 @@ ac_config_commands="$ac_config_commands include/stamp-h"
 
 $as_echo_n "creating Makefile rules..." >&6
 
-ALL_VARS_RULES="I386_LIBS = $I386_LIBS
+ALL_VARS_RULES="HOSTSTACK_CFLAGS = $HOSTSTACK_CFLAGS
+I386_LIBS = $I386_LIBS
 OPENGL_LIBS = $OPENGL_LIBS
 COREFOUNDATION_LIBS = $COREFOUNDATION_LIBS
 IOKIT_LIBS = $IOKIT_LIBS
@@ -19880,6 +20456,7 @@ OPENCL_LIBS = $OPENCL_LIBS
 QUICKTIME_LIBS = $QUICKTIME_LIBS
 CARBON_LIBS = $CARBON_LIBS
 METAL_LIBS = $METAL_LIBS
+AVFOUNDATION_LIBS = $AVFOUNDATION_LIBS
 PTHREAD_LIBS = $PTHREAD_LIBS
 X_CFLAGS = $X_CFLAGS
 X_PRE_LIBS = $X_PRE_LIBS
@@ -19977,6 +20554,10 @@ wine_fn_config_symlink wine
 if test "x$enable_win64" != xno -o -n "$with_wine64"; then
 ac_config_links="$ac_config_links wine64:tools/winewrapper"
 wine_fn_config_symlink wine64
+fi
+if test "x$enable_win32on64" != xno -o -n "$with_wine64"; then
+ac_config_links="$ac_config_links wine32on64:tools/winewrapper"
+wine_fn_config_symlink wine32on64
 fi
 
 wine_fn_config_makefile dlls/acledit enable_acledit
@@ -20367,6 +20948,8 @@ wine_fn_config_makefile dlls/dinput enable_dinput
 wine_fn_config_makefile dlls/dinput/tests enable_tests
 wine_fn_config_makefile dlls/dinput8 enable_dinput8
 wine_fn_config_makefile dlls/dinput8/tests enable_tests
+wine_fn_config_makefile dlls/directmanipulation enable_directmanipulation
+wine_fn_config_makefile dlls/directmanipulation/tests enable_tests
 wine_fn_config_makefile dlls/dispdib.dll16 enable_win16
 wine_fn_config_makefile dlls/dispex enable_dispex
 wine_fn_config_makefile dlls/dispex/tests enable_tests
@@ -20516,7 +21099,9 @@ wine_fn_config_makefile dlls/iccvid enable_iccvid
 wine_fn_config_makefile dlls/icmp enable_icmp
 wine_fn_config_makefile dlls/ieframe enable_ieframe
 wine_fn_config_makefile dlls/ieframe/tests enable_tests
+wine_fn_config_makefile dlls/ieinfo5.ocx enable_ieinfo5_ocx
 wine_fn_config_makefile dlls/ieproxy enable_ieproxy
+wine_fn_config_makefile dlls/iernonce enable_iernonce
 wine_fn_config_makefile dlls/ifsmgr.vxd enable_win16
 wine_fn_config_makefile dlls/imaadp32.acm enable_imaadp32_acm
 wine_fn_config_makefile dlls/imagehlp enable_imagehlp
@@ -21009,6 +21594,7 @@ wine_fn_config_makefile dlls/wmvcore enable_wmvcore
 wine_fn_config_makefile dlls/wmvcore/tests enable_tests
 wine_fn_config_makefile dlls/wnaspi32 enable_wnaspi32
 wine_fn_config_makefile dlls/wow32 enable_win16
+wine_fn_config_makefile dlls/wow64cpu enable_wow64cpu
 wine_fn_config_makefile dlls/wpc enable_wpc
 wine_fn_config_makefile dlls/wpc/tests enable_tests
 wine_fn_config_makefile dlls/wpcap enable_wpcap
@@ -21239,15 +21825,15 @@ then
       *)  reldir="../" ;;
     esac
         rm -f fonts server 2>/dev/null
-    wine_fn_append_rule "all: loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader
+    wine_fn_append_rule "all: loader/wine64 loader/wine64-preloader $with_wine64/loader/$wine_binary $with_wine64/loader/$wine_binary-preloader
 loader/wine64 loader/wine64-preloader:
 	rm -f \$@ && \$(LN_S) $reldir$with_wine64/\$@ \$@
-$with_wine64/loader/wine:
-	rm -f \$@ && \$(LN_S) $ac_pwd/loader/wine \$@
-$with_wine64/loader/wine-preloader:
-	rm -f \$@ && \$(LN_S) $ac_pwd/loader/wine-preloader \$@
+$with_wine64/loader/$wine_binary:
+	rm -f \$@ && \$(LN_S) $ac_pwd/loader/$wine_binary \$@
+$with_wine64/loader/$wine_binary-preloader:
+	rm -f \$@ && \$(LN_S) $ac_pwd/loader/$wine_binary-preloader \$@
 clean::
-	rm -f loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader"
+	rm -f loader/wine64 loader/wine64-preloader $with_wine64/loader/$wine_binary $with_wine64/loader/$wine_binary-preloader"
 else
     TOP_INSTALL_DEV="$TOP_INSTALL_DEV include"
     TOP_INSTALL_LIB="$TOP_INSTALL_LIB \
@@ -21256,24 +21842,7 @@ loader/l_intl.nls \
 loader/wine.inf \
 loader/winebus.inf \
 loader/winehid.inf \
-programs/msidb/msidb \
-programs/msiexec/msiexec \
-programs/notepad/notepad \
-programs/regedit/regedit \
-programs/regsvr32/regsvr32 \
-programs/wineboot/wineboot \
-programs/winecfg/winecfg \
-programs/wineconsole/wineconsole \
-programs/winedbg/winedbg \
-programs/winefile/winefile \
-programs/winemine/winemine \
-programs/winepath/winepath \
 server/wineserver"
-
-    case $host_os in
-      cygwin*|mingw32*|darwin*|macosx*|linux-android*) ;;
-      *) TOP_INSTALL_LIB="$TOP_INSTALL_LIB loader/wine.desktop" ;;
-    esac
 fi
 
 $as_echo " done" >&6
@@ -21995,6 +22564,7 @@ do
     "include/stamp-h") CONFIG_COMMANDS="$CONFIG_COMMANDS include/stamp-h" ;;
     "wine") CONFIG_LINKS="$CONFIG_LINKS wine:tools/winewrapper" ;;
     "wine64") CONFIG_LINKS="$CONFIG_LINKS wine64:tools/winewrapper" ;;
+    "wine32on64") CONFIG_LINKS="$CONFIG_LINKS wine32on64:tools/winewrapper" ;;
     "tools/makedep") CONFIG_COMMANDS="$CONFIG_COMMANDS tools/makedep" ;;
     "Makefile") CONFIG_COMMANDS="$CONFIG_COMMANDS Makefile" ;;
     "Make.tmp") CONFIG_FILES="$CONFIG_FILES Make.tmp:Makefile.in" ;;

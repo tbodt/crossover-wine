@@ -23,6 +23,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <wine/library.h>
+
 #ifdef WIDE_SCANF
 #define _CHAR_ MSVCRT_wchar_t
 #define _EOF_ MSVCRT_WEOF
@@ -293,7 +295,7 @@ _FUNCTION_ {
             switch(*format) {
 	    case 'p':
 	    case 'P': /* pointer. */
-                if (sizeof(void *) == sizeof(LONGLONG)) I64_prefix = 1;
+                if (wine_is_64bit()) I64_prefix = 1;
                 /* fall through */
 	    case 'x':
 	    case 'X': /* hexadecimal integer. */

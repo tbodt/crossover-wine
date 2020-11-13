@@ -60,7 +60,7 @@ DWORD WINAPI DECLSPEC_HIDDEN __wine_spec_exe_entry( PEB *peb )
     char **argv = build_argv( __wine_main_wargv );
     DWORD ret;
 
-    if (needs_init) _init( __wine_main_argc, argv, NULL );
+    if (needs_init) _init( __wine_main_argc, __wine_main_argv, NULL );
     ret = main( __wine_main_argc, argv );
     if (needs_init) _fini();
     ExitProcess( ret );

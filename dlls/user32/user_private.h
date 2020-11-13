@@ -56,6 +56,7 @@ enum wine_internal_message
     WM_WINE_KEYBOARD_LL_HOOK,
     WM_WINE_MOUSE_LL_HOOK,
     WM_WINE_CLIPCURSOR,
+    WM_WINE_UPDATEWINDOWSTATE,
     WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
     WM_WINE_LAST_DRIVER_MSG = 0x80001fff
 };
@@ -243,6 +244,7 @@ extern void move_window_bits( HWND hwnd, struct window_surface *old_surface,
                               const RECT *window_rect, const RECT *valid_rects ) DECLSPEC_HIDDEN;
 extern void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect,
                                      const RECT *valid_rects ) DECLSPEC_HIDDEN;
+extern void update_window_state( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
@@ -353,6 +355,8 @@ typedef struct
 
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
+
+extern BOOL MENU_send_window_menubar_to_macapp( HWND hwnd );
 
 /* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
 #ifdef __MINGW32__

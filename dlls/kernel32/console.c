@@ -573,7 +573,7 @@ BOOL WINAPI FreeConsole(VOID)
  * helper for AllocConsole
  * starts the renderer process
  */
-static  BOOL    start_console_renderer_helper(const char* appname, STARTUPINFOA* si,
+static  BOOL    start_console_renderer_helper(const char* HOSTPTR appname, STARTUPINFOA* si,
                                               HANDLE hEvent)
 {
     char		buffer[1024];
@@ -581,7 +581,7 @@ static  BOOL    start_console_renderer_helper(const char* appname, STARTUPINFOA*
     PROCESS_INFORMATION	pi;
 
     /* FIXME: use dynamic allocation for most of the buffers below */
-    ret = snprintf(buffer, sizeof(buffer), "%s --use-event=%ld", appname, (DWORD_PTR)hEvent);
+    ret = snprintf(buffer, sizeof(buffer), "%s --use-event=%ld", appname, (long)(DWORD_PTR)hEvent);
     if ((ret > -1) && (ret < sizeof(buffer)) &&
         CreateProcessA(NULL, buffer, NULL, NULL, TRUE, DETACHED_PROCESS,
                        NULL, NULL, si, &pi))
@@ -609,7 +609,7 @@ static  BOOL    start_console_renderer_helper(const char* appname, STARTUPINFOA*
 static	BOOL	start_console_renderer(STARTUPINFOA* si)
 {
     HANDLE		hEvent = 0;
-    LPSTR		p;
+    const char * HOSTPTR p;
     OBJECT_ATTRIBUTES	attr;
     BOOL                ret = FALSE;
 
@@ -1192,7 +1192,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleA( HANDLE handle, LPCVOID buffer, DWOR
     BOOL ret;
 
     if (written) *written = 0;
-    lenW = MultiByteToWideChar( cp, 0, buffer, length, NULL, 0 );
+    lenW = MultiByteToWideChar( cp, 0, (LPCSTR)buffer, length, NULL, 0 );
     if (!(strW = HeapAlloc( GetProcessHeap(), 0, lenW * sizeof(WCHAR) ))) return FALSE;
     MultiByteToWideChar( cp, 0, buffer, length, strW, lenW );
     ret = WriteConsoleW( handle, strW, lenW, written, 0 );
@@ -1231,11 +1231,11 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
         /* FIXME: mode ENABLED_OUTPUT is not processed (or actually we rely on underlying Unix/TTY fd
          * to do the job
          */
-        len = WideCharToMultiByte(CP_UNIXCP, 0, lpBuffer, nNumberOfCharsToWrite, NULL, 0, NULL, NULL);
+        len = WideCharToMultiByte(CP_UNIXCP, 0, psz, nNumberOfCharsToWrite, NULL, 0, NULL, NULL);
         if ((ptr = HeapAlloc(GetProcessHeap(), 0, len)) == NULL)
             return FALSE;
 
-        WideCharToMultiByte(CP_UNIXCP, 0, lpBuffer, nNumberOfCharsToWrite, ptr, len, NULL, NULL);
+        WideCharToMultiByte(CP_UNIXCP, 0, psz, nNumberOfCharsToWrite, ptr, len, NULL, NULL);
         hFile = wine_server_ptr_handle(console_handle_unmap(hConsoleOutput));
         status = NtWriteFile(hFile, NULL, NULL, NULL, &iosb, ptr, len, 0, NULL);
         if (status == STATUS_PENDING)
@@ -1802,7 +1802,7 @@ static COORD get_console_font_size(HANDLE hConsole, DWORD index)
     return c;
 }
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && !defined(__MINGW32__)
 #undef GetConsoleFontSize
 DWORD WINAPI GetConsoleFontSize(HANDLE hConsole, DWORD index)
 {
@@ -1819,7 +1819,7 @@ COORD WINAPI GetConsoleFontSize(HANDLE hConsole, DWORD index)
 {
     return get_console_font_size(hConsole, index);
 }
-#endif /* !defined(__i386__) */
+#endif /* defined(__i386__) || defined(__i386_on_x86_64__) */
 
 BOOL WINAPI GetConsoleFontInfo(HANDLE hConsole, BOOL maximize, DWORD numfonts, CONSOLE_FONT_INFO *info)
 {

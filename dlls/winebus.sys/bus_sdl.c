@@ -66,7 +66,7 @@ static const WCHAR sdl_busidW[] = {'S','D','L','J','O','Y',0};
 
 static DWORD map_controllers = 0;
 
-static void *sdl_handle = NULL;
+static void * HOSTPTR sdl_handle = NULL;
 static HANDLE deviceloop_handle;
 static UINT quit_event = -1;
 
@@ -111,9 +111,9 @@ MAKE_FUNCPTR(SDL_GameControllerAddMapping);
 MAKE_FUNCPTR(SDL_RegisterEvents);
 MAKE_FUNCPTR(SDL_PushEvent);
 #endif
-static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
-static Uint16 (*pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
-static Uint16 (*pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
+static Uint16 (* HOSTPTR pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
+static Uint16 (* HOSTPTR pSDL_JoystickGetProductVersion)(SDL_Joystick * joystick);
+static Uint16 (* HOSTPTR pSDL_JoystickGetVendor)(SDL_Joystick * joystick);
 
 struct platform_private
 {
@@ -619,10 +619,10 @@ static BOOL build_mapped_report_descriptor(struct platform_private *ext)
     return TRUE;
 }
 
-static int compare_platform_device(DEVICE_OBJECT *device, void *platform_dev)
+static int compare_platform_device(DEVICE_OBJECT *device, void * HOSTPTR platform_dev)
 {
     SDL_JoystickID id1 = impl_from_DEVICE_OBJECT(device)->id;
-    SDL_JoystickID id2 = PtrToUlong(platform_dev);
+    SDL_JoystickID id2 = PtrToUlong(ADDRSPACECAST(void*, platform_dev));
     return (id1 != id2);
 }
 
@@ -643,7 +643,7 @@ static NTSTATUS get_reportdescriptor(DEVICE_OBJECT *device, BYTE *buffer, DWORD 
 static NTSTATUS get_string(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length)
 {
     struct platform_private *ext = impl_from_DEVICE_OBJECT(device);
-    const char* str = NULL;
+    const char* HOSTPTR str = NULL;
 
     switch (index)
     {

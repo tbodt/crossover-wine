@@ -48,6 +48,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+#include "wine/hostaddrspace_enter.h"
+
 /* Not present in gnutls version < 2.9.10. */
 static int (*pgnutls_cipher_get_block_size)(gnutls_cipher_algorithm_t);
 
@@ -61,7 +63,9 @@ static int (*pgnutls_privkey_import_rsa_raw)(gnutls_privkey_t, const gnutls_datu
 /* Not present in gnutls version < 3.4.0. */
 static int (*pgnutls_privkey_export_x509)(gnutls_privkey_t, gnutls_x509_privkey_t *);
 
-static void *libgnutls_handle;
+#include "wine/hostaddrspace_exit.h"
+
+static void * HOSTPTR libgnutls_handle;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_alert_get);
 MAKE_FUNCPTR(gnutls_alert_get_name);
@@ -155,12 +159,12 @@ static int compat_gnutls_privkey_import_rsa_raw(gnutls_privkey_t key, const gnut
 }
 
 static ssize_t schan_pull_adapter(gnutls_transport_ptr_t transport,
-                                      void *buff, size_t buff_len)
+                                      void * HOSTPTR buff, size_t buff_len)
 {
-    struct schan_transport *t = (struct schan_transport*)transport;
+    struct schan_transport *t = ADDRSPACECAST(struct schan_transport * WIN32PTR, transport);
     gnutls_session_t s = (gnutls_session_t)schan_session_for_transport(t);
 
-    int ret = schan_pull(transport, buff, &buff_len);
+    int ret = schan_pull(t, buff, &buff_len);
     if (ret)
     {
         pgnutls_transport_set_errno(s, ret);
@@ -171,12 +175,12 @@ static ssize_t schan_pull_adapter(gnutls_transport_ptr_t transport,
 }
 
 static ssize_t schan_push_adapter(gnutls_transport_ptr_t transport,
-                                      const void *buff, size_t buff_len)
+                                      const void * HOSTPTR buff, size_t buff_len)
 {
-    struct schan_transport *t = (struct schan_transport*)transport;
+    struct schan_transport *t = ADDRSPACECAST(struct schan_transport * WIN32PTR, transport);
     gnutls_session_t s = (gnutls_session_t)schan_session_for_transport(t);
 
-    int ret = schan_push(transport, buff, &buff_len);
+    int ret = schan_push(t, buff, &buff_len);
     if (ret)
     {
         pgnutls_transport_set_errno(s, ret);
@@ -521,8 +525,16 @@ SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session
         return SEC_E_INTERNAL_ERROR;
 
     for(i = 0; i < list_size; i++) {
+#ifdef __i386_on_x86_64__
+        BYTE *data32 = heap_alloc(datum[i].size);
+        memcpy(data32, datum[i].data, datum[i].size);
+        res = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, data32, datum[i].size,
+                CERT_STORE_ADD_REPLACE_EXISTING, i ? NULL : &cert);
+        heap_free(data32);
+#else
         res = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, datum[i].data, datum[i].size,
                 CERT_STORE_ADD_REPLACE_EXISTING, i ? NULL : &cert);
+#endif
         if(!res) {
             if(i)
                 CertFreeCertificateContext(cert);
@@ -535,7 +547,7 @@ SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session
 }
 
 SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
-                               SIZE_T *length)
+                               size_t *length)
 {
     gnutls_session_t s = (gnutls_session_t)session;
     SSIZE_T ret, total = 0;
@@ -546,12 +558,12 @@ SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
         if (ret >= 0)
         {
             total += ret;
-            TRACE( "sent %ld now %ld/%ld\n", ret, total, *length );
+            TRACE( "sent %ld now %ld/%ld\n", (long)ret, (long)total, (long)*length );
             if (total == *length) return SEC_E_OK;
         }
         else if (ret == GNUTLS_E_AGAIN)
         {
-            struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
+            struct schan_transport *t = ADDRSPACECAST(struct schan_transport * WIN32PTR, pgnutls_transport_get_ptr(s));
             SIZE_T count = 0;
 
             if (schan_get_buffer(t, &t->out, &count)) continue;
@@ -566,7 +578,7 @@ SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
 }
 
 SECURITY_STATUS schan_imp_recv(schan_imp_session session, void *buffer,
-                               SIZE_T *length)
+                               size_t *length)
 {
     gnutls_session_t s = (gnutls_session_t)session;
     ssize_t ret;
@@ -578,7 +590,7 @@ again:
         *length = ret;
     else if (ret == GNUTLS_E_AGAIN)
     {
-        struct schan_transport *t = (struct schan_transport *)pgnutls_transport_get_ptr(s);
+        struct schan_transport *t = ADDRSPACECAST(struct schan_transport * WIN32PTR, pgnutls_transport_get_ptr(s));
         SIZE_T count = 0;
 
         if (schan_get_buffer(t, &t->in, &count))
@@ -703,7 +715,7 @@ static BYTE *get_key_blob(const CERT_CONTEXT *ctx, ULONG *size)
     return ret;
 }
 
-static inline void reverse_bytes(BYTE *buf, ULONG len)
+static inline void reverse_bytes(BYTE * HOSTPTR buf, ULONG len)
 {
     BYTE tmp;
     ULONG i;
@@ -864,15 +876,31 @@ void schan_imp_free_certificate_credentials(schan_credentials *c)
     pgnutls_certificate_free_credentials(c->credentials);
 }
 
+#include "wine/hostaddrspace_enter.h"
+
 static void schan_gnutls_log(int level, const char *msg)
 {
     TRACE("<%d> %s", level, msg);
 }
 
+#include "wine/hostaddrspace_exit.h"
+
 BOOL schan_imp_init(void)
 {
     int ret;
 
+if (1) { /* CROSSOVER HACK - bug 10151 */
+    const char *libgnutls_name_candidates[] = {SONAME_LIBGNUTLS,
+                                               "libgnutls.so.30",
+                                               "libgnutls.so.28",
+                                               "libgnutls-deb0.so.28",
+                                               "libgnutls.so.26",
+                                               NULL};
+    int i;
+    for (i=0; libgnutls_name_candidates[i] && !libgnutls_handle; i++)
+        libgnutls_handle = wine_dlopen(libgnutls_name_candidates[i], RTLD_NOW, NULL, 0);
+}
+else
     libgnutls_handle = wine_dlopen(SONAME_LIBGNUTLS, RTLD_NOW, NULL, 0);
     if (!libgnutls_handle)
     {

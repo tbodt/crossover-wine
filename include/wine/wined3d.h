@@ -27,6 +27,7 @@
 #define __WINE_WINED3D_H
 
 #include "wine/list.h"
+#include "wine/winheader_enter.h"
 
 #define WINED3D_OK                                              S_OK
 
@@ -2074,7 +2075,7 @@ struct wined3d_shader_signature
 struct wined3d_shader_desc
 {
     const DWORD *byte_code;
-    size_t byte_code_size;
+    SIZE_T byte_code_size;
 };
 
 struct wined3d_stream_output_element
@@ -2920,5 +2921,7 @@ static inline void wined3d_box_set(struct wined3d_box *box, unsigned int left, u
     box->front = front;
     box->back = back;
 }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WINED3D_H */

@@ -21,6 +21,8 @@
 
 #include "wine/list.h"
 
+#include "wine/winheader_enter.h"
+
 HRESULT WINAPI CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc);
 void WINAPI FreeMediaType(AM_MEDIA_TYPE * pMediaType);
 AM_MEDIA_TYPE * WINAPI CreateMediaType(AM_MEDIA_TYPE const * pSrc);
@@ -535,3 +537,5 @@ void strmbase_renderer_cleanup(struct strmbase_renderer *filter);
 BOOL WINAPI STRMBASE_DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv);
 HRESULT WINAPI STRMBASE_DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv);
 HRESULT WINAPI STRMBASE_DllCanUnloadNow(void);
+
+#include "wine/winheader_exit.h"

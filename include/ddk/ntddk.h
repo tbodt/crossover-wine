@@ -19,6 +19,8 @@
 #ifndef _NTDDK_
 #define _NTDDK_
 
+#include "wine/winheader_enter.h"
+
 /* Note: We will probably have to duplicate everything ultimately :-( */
 #include <ddk/wdm.h>
 
@@ -231,5 +233,7 @@ NTSTATUS  WINAPI PsSetCreateThreadNotifyRoutine(PCREATE_THREAD_NOTIFY_ROUTINE);
 NTSTATUS  WINAPI PsSetLoadImageNotifyRoutine(PLOAD_IMAGE_NOTIFY_ROUTINE);
 void      WINAPI RtlInitializeGenericTableAvl(PRTL_AVL_TABLE,PRTL_AVL_COMPARE_ROUTINE,PRTL_AVL_ALLOCATE_ROUTINE, PRTL_AVL_FREE_ROUTINE,void *);
 void      WINAPI RtlInsertElementGenericTableAvl(PRTL_AVL_TABLE,void *,ULONG,BOOL*);
+
+#include "wine/winheader_exit.h"
 
 #endif

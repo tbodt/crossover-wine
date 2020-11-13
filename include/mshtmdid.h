@@ -19,6 +19,8 @@
 #ifndef __MSHTMDID_H__
 #define __MSHTMDID_H__
 
+#include "wine/winheader_enter.h"
+
 #define DISPID_NORMAL_FIRST     1000
 #define DISPID_IE8_NORMAL_FIRST (DISPID_NORMAL_FIRST+150)
 
@@ -4713,5 +4715,7 @@
 
 /* IDocumentRange */
 #define DISPID_IDOCUMENTRANGE_CREATERANGE DISPID_OMDOCUMENT+111
+
+#include "wine/winheader_exit.h"
 
 #endif /* __MSHTMDID_H__ */

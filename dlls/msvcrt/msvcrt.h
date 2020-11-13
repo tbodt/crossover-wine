@@ -80,9 +80,9 @@ typedef unsigned __int64 MSVCRT_size_t;
 typedef __int64 MSVCRT_intptr_t;
 typedef unsigned __int64 MSVCRT_uintptr_t;
 #else
-typedef unsigned long MSVCRT_size_t;
-typedef long MSVCRT_intptr_t;
-typedef unsigned long MSVCRT_uintptr_t;
+typedef unsigned __int32 MSVCRT_size_t;
+typedef __int32 MSVCRT_intptr_t;
+typedef unsigned __int32 MSVCRT_uintptr_t;
 #endif
 #ifdef _CRTDLL
 typedef short MSVCRT__dev_t;
@@ -514,20 +514,20 @@ struct MSVCRT__heapinfo {
   int            _useflag;
 };
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 struct MSVCRT___JUMP_BUFFER {
-    unsigned long Ebp;
-    unsigned long Ebx;
-    unsigned long Edi;
-    unsigned long Esi;
-    unsigned long Esp;
-    unsigned long Eip;
-    unsigned long Registration;
-    unsigned long TryLevel;
+    unsigned __int32 Ebp;
+    unsigned __int32 Ebx;
+    unsigned __int32 Edi;
+    unsigned __int32 Esi;
+    unsigned __int32 Esp;
+    unsigned __int32 Eip;
+    unsigned __int32 Registration;
+    unsigned __int32 TryLevel;
     /* Start of new struct members */
-    unsigned long Cookie;
-    unsigned long UnwindFunc;
-    unsigned long UnwindData[6];
+    unsigned __int32 Cookie;
+    unsigned __int32 UnwindFunc;
+    unsigned __int32 UnwindData[6];
 };
 #elif defined(__x86_64__)
 struct MSVCRT__SETJMP_FLOAT128
@@ -1138,6 +1138,9 @@ int            __cdecl _ismbclegal(unsigned int c);
 int            __cdecl _ismbstrail(const unsigned char* start, const unsigned char* str);
 int            __cdecl MSVCRT_mbtowc(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 int            __cdecl MSVCRT_mbtowc_l(MSVCRT_wchar_t*,const char*,MSVCRT_size_t,MSVCRT__locale_t);
+#ifdef __i386_on_x86_64__
+int            __cdecl MSVCRT_mbtowc_l(MSVCRT_wchar_t* HOSTPTR,const char* HOSTPTR,MSVCRT_size_t,MSVCRT__locale_t) __attribute__((overloadable)) DECLSPEC_HIDDEN;
+#endif
 MSVCRT_size_t  __cdecl MSVCRT_mbstowcs(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 MSVCRT_size_t  __cdecl MSVCRT__mbstowcs_l(MSVCRT_wchar_t*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 int            __cdecl MSVCRT__mbstowcs_s_l(MSVCRT_size_t*, MSVCRT_wchar_t*,
@@ -1162,10 +1165,19 @@ int*    __cdecl  __p___mb_cur_max(void);
 int*    __cdecl  MSVCRT___p__fmode(void);
 MSVCRT_wchar_t* __cdecl MSVCRT__wcsdup(const MSVCRT_wchar_t*);
 MSVCRT_size_t __cdecl MSVCRT_strnlen(const char *,MSVCRT_size_t);
+#ifdef __i386_on_x86_64__
+MSVCRT_size_t __cdecl MSVCRT_strnlen(const char * HOSTPTR,MSVCRT_size_t) __attribute__((overloadable)) DECLSPEC_HIDDEN;
+#endif
 MSVCRT_size_t __cdecl MSVCRT_wcsnlen(const MSVCRT_wchar_t*,MSVCRT_size_t);
+#ifdef __i386_on_x86_64__
+MSVCRT_size_t __cdecl MSVCRT_wcsnlen(const MSVCRT_wchar_t* HOSTPTR,MSVCRT_size_t) __attribute__((overloadable)) DECLSPEC_HIDDEN;
+#endif
 MSVCRT_wchar_t*** __cdecl MSVCRT___p__wenviron(void);
 INT     __cdecl MSVCRT_wctomb(char*,MSVCRT_wchar_t);
 int     __cdecl MSVCRT__wctomb_l(char*, MSVCRT_wchar_t, MSVCRT__locale_t);
+#ifdef __i386_on_x86_64__
+int     __cdecl MSVCRT__wctomb_l(char* HOSTPTR, MSVCRT_wchar_t, MSVCRT__locale_t) __attribute__((overloadable)) DECLSPEC_HIDDEN;
+#endif
 char*   __cdecl MSVCRT__strdate(char* date);
 char*   __cdecl MSVCRT__strtime(char* date);
 int     __cdecl _setmbcp(int);
@@ -1209,7 +1221,13 @@ double parse_double(MSVCRT_wchar_t (*)(void*), void (*)(void*), void*, MSVCRT_pt
 
 #define MSVCRT__ARGMAX 100
 typedef int (*puts_clbk_a)(void*, int, const char*);
+#ifdef __i386_on_x86_64__
+typedef int (*puts_clbk_a_HOSTPTR)(void* HOSTPTR, int, const char* HOSTPTR);
+#endif
 typedef int (*puts_clbk_w)(void*, int, const MSVCRT_wchar_t*);
+#ifdef __i386_on_x86_64__
+typedef int (*puts_clbk_w_HOSTPTR)(void* HOSTPTR, int, const MSVCRT_wchar_t* HOSTPTR);
+#endif
 typedef union _printf_arg
 {
     void *get_ptr;
@@ -1220,6 +1238,10 @@ typedef union _printf_arg
 typedef printf_arg (*args_clbk)(void*, int, int, __ms_va_list*);
 int pf_printf_a(puts_clbk_a, void*, const char*, MSVCRT__locale_t,
         DWORD, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
+#ifdef __i386_on_x86_64__
+int pf_printf_a_HOSTPTR(puts_clbk_a_HOSTPTR, void*, const char* HOSTPTR, MSVCRT__locale_t,
+        DWORD, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
+#endif
 int pf_printf_w(puts_clbk_w, void*, const MSVCRT_wchar_t*, MSVCRT__locale_t,
         DWORD, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
 int create_positional_ctx_a(void*, const char*, __ms_va_list) DECLSPEC_HIDDEN;

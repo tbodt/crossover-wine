@@ -81,6 +81,7 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "esync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
 
@@ -96,7 +97,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 #define SOCKETNAME "socket"        /* name of the socket file */
 #define LOCKNAME   "lock"          /* name of the lock file */
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static const enum cpu_type client_cpu = CPU_x86;
 #elif defined(__x86_64__)
 static const enum cpu_type client_cpu = CPU_x86_64;
@@ -119,17 +120,17 @@ sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
 static pid_t server_pid;
 
-static RTL_CRITICAL_SECTION fd_cache_section;
+RTL_CRITICAL_SECTION fd_cache_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
     0, 0, &fd_cache_section,
     { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
       0, 0, { (DWORD_PTR)(__FILE__ ": fd_cache_section") }
 };
-static RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /* atomically exchange a 64-bit value */
-static inline LONG64 interlocked_xchg64( LONG64 *dest, LONG64 val )
+static inline LONG64 interlocked_xchg64( LONG64 * HOSTPTR dest, LONG64 val )
 {
 #ifdef _WIN64
     return (LONG64)interlocked_xchg_ptr( (void **)dest, (void *)val );
@@ -143,7 +144,7 @@ static inline LONG64 interlocked_xchg64( LONG64 *dest, LONG64 val )
 #ifdef __GNUC__
 static void fatal_error( const char *err, ... ) __attribute__((noreturn, format(printf,1,2)));
 static void fatal_perror( const char *err, ... ) __attribute__((noreturn, format(printf,1,2)));
-static void server_connect_error( const char *serverdir ) __attribute__((noreturn));
+static void server_connect_error( const char * HOSTPTR serverdir ) __attribute__((noreturn));
 #endif
 
 /* die on a fatal error; use only during initialization */
@@ -696,6 +697,8 @@ unsigned int server_queue_process_apc( HANDLE process, const apc_call_t *call, a
 }
 
 
+#include "wine/hostptraddrspace_enter.h"
+
 /***********************************************************************
  *           wine_server_send_fd   (NTDLL.@)
  *
@@ -727,7 +730,7 @@ void CDECL wine_server_send_fd( int fd )
     cmsg->cmsg_len   = CMSG_LEN( sizeof(fd) );
     cmsg->cmsg_level = SOL_SOCKET;
     cmsg->cmsg_type  = SCM_RIGHTS;
-    *(int *)CMSG_DATA(cmsg) = fd;
+    *(int * HOSTPTR)CMSG_DATA(cmsg) = fd;
     msghdr.msg_controllen = cmsg->cmsg_len;
 #endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
@@ -758,7 +761,7 @@ void CDECL wine_server_send_fd( int fd )
  *
  * Receive a file descriptor passed from the server.
  */
-static int receive_fd( obj_handle_t *handle )
+int receive_fd( obj_handle_t *handle )
 {
     struct iovec vec;
     struct msghdr msghdr;
@@ -790,7 +793,7 @@ static int receive_fd( obj_handle_t *handle )
             for (cmsg = CMSG_FIRSTHDR( &msghdr ); cmsg; cmsg = CMSG_NXTHDR( &msghdr, cmsg ))
             {
                 if (cmsg->cmsg_level != SOL_SOCKET) continue;
-                if (cmsg->cmsg_type == SCM_RIGHTS) fd = *(int *)CMSG_DATA(cmsg);
+                if (cmsg->cmsg_type == SCM_RIGHTS) fd = *(int * HOSTPTR)CMSG_DATA(cmsg);
 #ifdef SCM_CREDENTIALS
                 else if (cmsg->cmsg_type == SCM_CREDENTIALS)
                 {
@@ -811,6 +814,8 @@ static int receive_fd( obj_handle_t *handle )
     /* the server closed the connection; time to die... */
     abort_thread(0);
 }
+
+#include "wine/hostptraddrspace_exit.h"
 
 
 /***********************************************************************/
@@ -833,7 +838,7 @@ C_ASSERT( sizeof(union fd_cache_entry) == sizeof(LONG64) );
 #define FD_CACHE_BLOCK_SIZE  (65536 / sizeof(union fd_cache_entry))
 #define FD_CACHE_ENTRIES     128
 
-static union fd_cache_entry *fd_cache[FD_CACHE_ENTRIES];
+static union fd_cache_entry * HOSTPTR fd_cache[FD_CACHE_ENTRIES];
 static union fd_cache_entry fd_cache_initial_block[FD_CACHE_BLOCK_SIZE];
 
 static inline unsigned int handle_to_index( HANDLE handle, unsigned int *entry )
@@ -866,9 +871,9 @@ static BOOL add_fd_to_cache( HANDLE handle, int fd, enum server_fd_type type,
         if (!entry) fd_cache[0] = fd_cache_initial_block;
         else
         {
-            void *ptr = wine_anon_mmap( NULL, FD_CACHE_BLOCK_SIZE * sizeof(union fd_cache_entry),
+            void * HOSTPTR ptr = wine_anon_mmap( NULL, FD_CACHE_BLOCK_SIZE * sizeof(union fd_cache_entry),
                                         PROT_READ | PROT_WRITE, 0 );
-            if (ptr == MAP_FAILED) return FALSE;
+            if (ptr == MAP_FAILED_HOSTPTR) return FALSE;
             fd_cache[entry] = ptr;
         }
     }
@@ -1101,7 +1106,7 @@ int server_pipe( int fd[2] )
 static void start_server(void)
 {
     static BOOL started;  /* we only try once */
-    char *argv[3];
+    char * HOSTPTR argv[3];
     static char wineserver[] = "server/wineserver";
     static char debug[] = "-d";
 
@@ -1134,7 +1139,7 @@ static void start_server(void)
  */
 static int setup_config_dir(void)
 {
-    const char *p, *config_dir = wine_get_config_dir();
+    const char * HOSTPTR p, * HOSTPTR config_dir = wine_get_config_dir();
     int fd_cwd = open( ".", O_RDONLY );
 
     if (chdir( config_dir ) == -1)
@@ -1144,7 +1149,7 @@ static int setup_config_dir(void)
         if ((p = strrchr( config_dir, '/' )) && p != config_dir)
         {
             struct stat st;
-            char *tmp_dir;
+            char * HOSTPTR tmp_dir;
 
             if (!(tmp_dir = malloc( p + 1 - config_dir ))) fatal_error( "out of memory\n" );
             memcpy( tmp_dir, config_dir, p - config_dir );
@@ -1171,7 +1176,13 @@ static int setup_config_dir(void)
 
     mkdir( "drive_c", 0777 );
     symlink( "../drive_c", "dosdevices/c:" );
+#ifndef __ANDROID__
     symlink( "/", "dosdevices/z:" );
+#else
+    mkdir( "drive_c/fonts", 0777 );
+    symlink( "/system/fonts", "drive_c/fonts/system" );
+    symlink( "../../../../share/wine/fonts", "drive_c/fonts/wine" );
+#endif
 
 done:
     if (fd_cwd == -1) fd_cwd = open( "dosdevices/c:", O_RDONLY );
@@ -1186,7 +1197,7 @@ done:
  * Try to display a meaningful explanation of why we couldn't connect
  * to the server.
  */
-static void server_connect_error( const char *serverdir )
+static void server_connect_error( const char * HOSTPTR serverdir )
 {
     int fd;
     struct flock fl;
@@ -1221,7 +1232,7 @@ static void server_connect_error( const char *serverdir )
  */
 static int server_connect(void)
 {
-    const char *serverdir;
+    const char * HOSTPTR serverdir;
     struct sockaddr_un addr;
     struct stat st;
     int s, slen, retry, fd_cwd;
@@ -1315,7 +1326,7 @@ static void send_server_task_port(void)
 
     if (task_get_bootstrap_port(mach_task_self(), &bootstrap_port) != KERN_SUCCESS) return;
 
-    kret = bootstrap_look_up(bootstrap_port, (char*)wine_get_server_dir(), &wineserver_port);
+    kret = bootstrap_look_up(bootstrap_port, (char* HOSTPTR)wine_get_server_dir(), &wineserver_port);
     if (kret != KERN_SUCCESS)
         fatal_error( "cannot find the server port: 0x%08x\n", kret );
 
@@ -1378,7 +1389,7 @@ static int get_unix_tid(void)
 void server_init_process(void)
 {
     obj_handle_t version;
-    const char *env_socket = getenv( "WINESERVERSOCKET" );
+    const char * HOSTPTR env_socket = getenv( "WINESERVERSOCKET" );
 
     server_pid = -1;
     if (env_socket)
@@ -1390,7 +1401,7 @@ void server_init_process(void)
     }
     else
     {
-        const char *arch = getenv( "WINEARCH" );
+        const char * HOSTPTR arch = getenv( "WINEARCH" );
 
         if (arch && strcmp( arch, "win32" ) && strcmp( arch, "win64" ))
             fatal_error( "WINEARCH set to invalid value '%s', it must be either win32 or win64.\n", arch );
@@ -1461,7 +1472,7 @@ void server_init_process_done(void)
     SERVER_START_REQ( init_process_done )
     {
         req->module   = wine_server_client_ptr( peb->ImageBaseAddress );
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
         req->ldt_copy = wine_server_client_ptr( &wine_ldt_copy );
 #endif
         req->entry    = wine_server_client_ptr( entry );
@@ -1483,9 +1494,8 @@ void server_init_process_done(void)
  */
 size_t server_init_thread( void *entry_point, BOOL *suspend )
 {
-    static const char *cpu_names[] = { "x86", "x86_64", "PowerPC", "ARM", "ARM64" };
-    static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
-    const char *arch = getenv( "WINEARCH" );
+    static const char * const cpu_names[] = { "x86", "x86_64", "PowerPC", "ARM", "ARM64" };
+    const char * HOSTPTR arch = getenv( "WINEARCH" );
     int ret;
     int reply_pipe[2];
     struct sigaction sig_act;
@@ -1526,7 +1536,7 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
     }
     SERVER_END_REQ;
 
-    is_wow64 = !is_win64 && (server_cpus & ((1 << CPU_x86_64) | (1 << CPU_ARM64))) != 0;
+    is_wow64 = !wine_is_64bit() && (server_cpus & ((1 << CPU_x86_64) | (1 << CPU_ARM64))) != 0;
     ntdll_get_thread_data()->wow64_redir = is_wow64;
 
     switch (ret)
@@ -1534,10 +1544,10 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
     case STATUS_SUCCESS:
         if (arch)
         {
-            if (!strcmp( arch, "win32" ) && (is_win64 || is_wow64))
+            if (!strcmp( arch, "win32" ) && (wine_is_64bit() || is_wow64))
                 fatal_error( "WINEARCH set to win32 but '%s' is a 64-bit installation.\n",
                              wine_get_config_dir() );
-            if (!strcmp( arch, "win64" ) && !is_win64 && !is_wow64)
+            if (!strcmp( arch, "win64" ) && !wine_is_64bit() && !is_wow64)
                 fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n",
                              wine_get_config_dir() );
         }

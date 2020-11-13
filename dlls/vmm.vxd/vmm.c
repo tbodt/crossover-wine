@@ -156,7 +156,13 @@ DWORD WINAPI VMM_VxDCall( DWORD service, CONTEXT *context )
         if ( page == PR_PRIVATE || page == PR_SHARED ) page = 0;
         /* FIXME: Handle flags in some way */
         address = (LPVOID )(page * page_size);
-        ret = VirtualAlloc ( address, npages * page_size, MEM_RESERVE, PAGE_EXECUTE_READWRITE );
+       if (flags & PR_STATIC)
+           /* FIXME: this isn't right, it's just a workaround for the stupid native wininet which
+            * thinks it's a good idea to allocate its own stack without committing it
+            */
+           ret = VirtualAlloc ( address, npages * page_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
+       else
+           ret = VirtualAlloc ( address, npages * page_size, MEM_RESERVE, PAGE_EXECUTE_READWRITE );
         TRACE("PageReserve: returning: %p\n", ret );
         if ( ret == NULL )
           return -1;

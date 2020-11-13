@@ -442,6 +442,48 @@ static size_t signal_stack_size;
 
 static wine_signal_handler handlers[256];
 
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
+extern NTSTATUS WINAPI __syscall_NtGetContextThread( HANDLE handle, CONTEXT *context );
+
+/* convert from straight ASCII to Unicode without depending on the current codepage */
+static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
+{
+    while (len--) *dst++ = (unsigned char)*src++;
+}
+
+static void* WINAPI __wine_fakedll_dispatcher( const char *module, ULONG ord )
+{
+    UNICODE_STRING name;
+    NTSTATUS status;
+    HMODULE base;
+    WCHAR *moduleW;
+    void *proc = NULL;
+    DWORD len = strlen(module);
+
+    TRACE( "(%s, %u)\n", debugstr_a(module), ord );
+
+    if (!(moduleW = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        return NULL;
+
+    ascii_to_unicode( moduleW, module, len );
+    moduleW[ len ] = 0;
+    RtlInitUnicodeString( &name, moduleW );
+
+    status = LdrGetDllHandle( NULL, 0, &name, &base );
+    if (status == STATUS_DLL_NOT_FOUND)
+        status = LdrLoadDll( NULL, 0, &name, &base );
+    if (status == STATUS_SUCCESS)
+        status = LdrAddRefDll( LDR_ADDREF_DLL_PIN, base );
+    if (status == STATUS_SUCCESS)
+        status = LdrGetProcedureAddress( base, NULL, ord, &proc );
+
+    if (status)
+        FIXME( "No procedure address found for %s.#%u, status %x\n", debugstr_a(module), ord, status );
+
+    RtlFreeHeap( GetProcessHeap(), 0, moduleW );
+    return proc;
+}
+
 enum i386_trap_code
 {
     TRAP_x86_UNKNOWN    = -1,  /* Unknown fault (TRAP_sig not defined) */
@@ -856,7 +898,7 @@ static inline void *init_handler( const ucontext_t *sigcontext, WORD *fs, WORD *
          * SS is still non-system segment. This is why both CS and SS
          * are checked.
          */
-        return teb->WOW32Reserved;
+        return teb->SystemReserved1[0];
     }
     return (void *)(ESP_sig(sigcontext) & ~3);
 }
@@ -1458,7 +1500,7 @@ NTSTATUS CDECL DECLSPEC_HIDDEN __regs_NtGetContextThread( DWORD edi, DWORD esi, 
         {
             context->Ebp    = ebp;
             context->Esp    = (DWORD)&retaddr;
-            context->Eip    = *(&edi - 1);
+            context->Eip    = (DWORD)SYSCALL(NtGetContextThread) + 18;
             context->SegCs  = wine_get_cs();
             context->SegSs  = wine_get_ss();
             context->EFlags = eflags;
@@ -2303,6 +2345,8 @@ NTSTATUS signal_alloc_thread( TEB **teb )
         *teb = addr;
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
+        (*teb)->Spare2 = __wine_fakedll_dispatcher;
         thread_data = (struct x86_thread_data *)(*teb)->SystemReserved2;
         if (!(thread_data->fs = wine_ldt_alloc_fs()))
         {
@@ -2500,6 +2544,7 @@ __ASM_STDCALL_FUNC( RtlUnwind, 16,
                     __ASM_CFI(".cfi_same_value %ebp\n\t")
                     "ret $16" )  /* actually never returns */
 
+NTSTATUS WINAPI __syscall_NtContinue( CONTEXT *context, BOOLEAN alert );
 
 /*******************************************************************
  *		NtRaiseException (NTDLL.@)
@@ -2510,7 +2555,7 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
     {
         NTSTATUS status = send_debug_event( rec, TRUE, context );
         if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
-            NtSetContextThread( GetCurrentThread(), context );
+            SYSCALL(NtContinue)(context, FALSE);
     }
     return raise_exception( rec, context, first_chance );
 }
@@ -2805,7 +2850,7 @@ __ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret")
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( NtCurrentTeb, 0, ".byte 0x64\n\tmovl 0x18,%eax\n\tret" )
+__ASM_STDCALL_FUNC( NTDLL_NtCurrentTeb, 0, ".byte 0x64\n\tmovl 0x18,%eax\n\tret" )
 
 
 /**************************************************************************

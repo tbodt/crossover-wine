@@ -25,6 +25,7 @@
 #include "dbghelp_private.h"
 #include "wine/winbase16.h"
 #include "winternl.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
@@ -33,7 +34,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD sel)
 {
     LDT_ENTRY	le;
@@ -42,7 +43,11 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD s
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
     if (hThread && GetThreadSelectorEntry(hThread, sel, &le))
+    {
+        if (wine_ldt_get_base(&le) == 0 && wine_ldt_get_limit(&le) == 0xffffffff)
+            return AddrModeFlat;
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
+    }
     /* selector doesn't exist */
     return -1;
 }
@@ -75,7 +80,7 @@ static BOOL i386_build_addr(HANDLE hThread, const CONTEXT* ctx, ADDRESS64* addr,
 static BOOL i386_get_addr(HANDLE hThread, const CONTEXT* ctx,
                           enum cpu_addr ca, ADDRESS64* addr)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     switch (ca)
     {
     case cpu_addr_pc:    return i386_build_addr(hThread, ctx, addr, ctx->SegCs, ctx->Eip);
@@ -213,16 +218,16 @@ static BOOL i386_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
         /* Init done */
         set_curr_mode((frame->AddrPC.Mode == AddrModeFlat) ? stm_32bit : stm_16bit);
 
-        /* cur_switch holds address of WOW32Reserved field in TEB in debuggee
+        /* cur_switch holds address of SystemReserved1[0] field in TEB in debuggee
          * address space
          */
         if (NtQueryInformationThread(csw->hThread, ThreadBasicInformation, &info,
                                      sizeof(info), NULL) == STATUS_SUCCESS)
         {
-            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, WOW32Reserved);
+            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, SystemReserved1[0]);
             if (!sw_read_mem(csw, curr_switch, &p, sizeof(p)))
             {
-                WARN("Can't read TEB:WOW32Reserved\n");
+                WARN("Can't read TEB:SystemReserved1[0]\n");
                 goto done_err;
             }
             next_switch = p;
@@ -670,7 +675,7 @@ static BOOL i386_fetch_minidump_thread(struct dump_context* dc, unsigned index, 
     if (ctx->ContextFlags && (flags & ThreadWriteInstructionWindow))
     {
         /* FIXME: crop values across module boundaries, */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
         ULONG base = ctx->Eip <= 0x80 ? 0 : ctx->Eip - 0x80;
         minidump_add_memory_block(dc, base, ctx->Eip + 0x80 - base, 0);
 #endif

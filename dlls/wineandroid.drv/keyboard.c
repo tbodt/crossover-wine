@@ -683,6 +683,40 @@ static void send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD flags )
     __wine_send_input( hwnd, &input );
 }
 
+static void clear_key_state( int key, int state,
+                             int alt_key, int alt_state )
+{
+    int key_down = state & 0x80;
+    int alt_key_down = alt_state & 0x80;
+
+    if (key_down)
+        send_keyboard_input( 0, key, vkey_to_scancode[key], KEYEVENTF_KEYUP );
+
+    if (alt_key_down)
+        send_keyboard_input( 0, alt_key, vkey_to_scancode[alt_key], KEYEVENTF_KEYUP );
+}
+
+void handle_clear_meta_key_states( int states )
+{
+    BYTE keystate[256];
+
+    TRACE( " states : 0x%0x\n", states );
+
+    if (get_async_key_state( keystate ))
+    {
+        if (states & AMETA_SHIFT_ON)
+        {
+            clear_key_state( VK_LSHIFT, keystate[VK_LSHIFT],
+                             VK_RSHIFT, keystate[VK_RSHIFT] );
+        }
+        if (states & AMETA_ALT_ON)
+        {
+            clear_key_state( VK_LMENU, keystate[VK_LMENU],
+                             VK_RMENU, keystate[VK_RMENU] );
+        }
+    }
+}
+
 /***********************************************************************
  *           update_keyboard_lock_state
  */
@@ -742,11 +776,17 @@ jboolean keyboard_event( JNIEnv *env, jobject obj, jint win, jint action, jint k
     data.kbd.input.u.ki.dwFlags     = (data.kbd.input.u.ki.wScan & 0x100) ? KEYEVENTF_EXTENDEDKEY : 0;
     if (action == AKEY_EVENT_ACTION_UP) data.kbd.input.u.ki.dwFlags |= KEYEVENTF_KEYUP;
 
-    p__android_log_print( ANDROID_LOG_INFO, "wine",
-                          "keyboard_event: win %x code %u vkey %x scan %x meta %x",
-                          win, keycode, data.kbd.input.u.ki.wVk, data.kbd.input.u.ki.wScan, state );
     send_event( &data );
     return JNI_TRUE;
+}
+
+jboolean clear_meta_key_states( JNIEnv *env, jobject obj, jint states )
+{
+    union event_data data;
+    data.type = CLEAR_META;
+    data.clearmeta.states = states;
+    send_event( &data );
+    return TRUE;
 }
 
 

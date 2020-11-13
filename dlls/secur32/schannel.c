@@ -39,7 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
 #if defined(SONAME_LIBGNUTLS) || defined (HAVE_SECURITY_SECURITY_H)
 
-#define SCHAN_INVALID_HANDLE ~0UL
+#define SCHAN_INVALID_HANDLE ((ULONG_PTR)-1)
 
 enum schan_handle_type
 {
@@ -124,7 +124,7 @@ static void *schan_free_handle(ULONG_PTR handle_idx, enum schan_handle_type type
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
-        ERR("Handle %ld(%p) is not of type %#x\n", handle_idx, handle, type);
+        ERR("Handle %ld(%p) is not of type %#x\n", (long)handle_idx, handle, type);
         return NULL;
     }
 
@@ -145,7 +145,7 @@ static void *schan_get_object(ULONG_PTR handle_idx, enum schan_handle_type type)
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
-        ERR("Handle %ld(%p) is not of type %#x\n", handle_idx, handle, type);
+        ERR("Handle %ld(%p) is not of type %#x\n", (long)handle_idx, handle, type);
         return NULL;
     }
 
@@ -543,7 +543,7 @@ static void init_schan_buffers(struct schan_buffers *s, const PSecBufferDesc des
         int (*get_next_buffer)(const struct schan_transport *, struct schan_buffers *))
 {
     s->offset = 0;
-    s->limit = ~0UL;
+    s->limit = ~((SIZE_T)0);
     s->desc = desc;
     s->current_buffer_idx = -1;
     s->allow_buffer_resize = FALSE;
@@ -581,7 +581,7 @@ static void schan_resize_current_buffer(const struct schan_buffers *s, SIZE_T mi
 
     if (!new_data)
     {
-        TRACE("Failed to resize %p from %d to %ld\n", b->pvBuffer, b->cbBuffer, new_size);
+        TRACE("Failed to resize %p from %d to %ld\n", b->pvBuffer, b->cbBuffer, (long)new_size);
         return;
     }
 
@@ -617,7 +617,7 @@ char *schan_get_buffer(const struct schan_transport *t, struct schan_buffers *s,
 
     schan_resize_current_buffer(s, s->offset + *count);
     max_count = buffer->cbBuffer - s->offset;
-    if (s->limit != ~0UL && s->limit < max_count)
+    if (s->limit != ~((SIZE_T)0) && s->limit < max_count)
         max_count = s->limit;
     if (!max_count)
     {
@@ -637,7 +637,7 @@ char *schan_get_buffer(const struct schan_transport *t, struct schan_buffers *s,
 
     if (*count > max_count)
         *count = max_count;
-    if (s->limit != ~0UL)
+    if (s->limit != ~((SIZE_T)0))
         s->limit -= *count;
 
     return (char *)buffer->pvBuffer + s->offset;
@@ -662,12 +662,12 @@ char *schan_get_buffer(const struct schan_transport *t, struct schan_buffers *s,
  *  another errno-style error value on failure
  *
  */
-int schan_pull(struct schan_transport *t, void *buff, size_t *buff_len)
+int schan_pull(struct schan_transport *t, void * HOSTPTR buff, size_t *buff_len)
 {
     char *b;
     SIZE_T local_len = *buff_len;
 
-    TRACE("Pull %lu bytes\n", local_len);
+    TRACE("Pull %lu bytes\n", (unsigned long)local_len);
 
     *buff_len = 0;
 
@@ -678,7 +678,7 @@ int schan_pull(struct schan_transport *t, void *buff, size_t *buff_len)
     memcpy(buff, b, local_len);
     t->in.offset += local_len;
 
-    TRACE("Read %lu bytes\n", local_len);
+    TRACE("Read %lu bytes\n", (unsigned long)local_len);
 
     *buff_len = local_len;
     return 0;
@@ -701,12 +701,12 @@ int schan_pull(struct schan_transport *t, void *buff, size_t *buff_len)
  *  another errno-style error value on failure
  *
  */
-int schan_push(struct schan_transport *t, const void *buff, size_t *buff_len)
+int schan_push(struct schan_transport *t, const void * HOSTPTR buff, size_t *buff_len)
 {
     char *b;
     SIZE_T local_len = *buff_len;
 
-    TRACE("Push %lu bytes\n", local_len);
+    TRACE("Push %lu bytes\n", (unsigned long)local_len);
 
     *buff_len = 0;
 
@@ -717,7 +717,7 @@ int schan_push(struct schan_transport *t, const void *buff, size_t *buff_len)
     memcpy(b, buff, local_len);
     t->out.offset += local_len;
 
-    TRACE("Wrote %lu bytes\n", local_len);
+    TRACE("Wrote %lu bytes\n", (unsigned long)local_len);
 
     *buff_len = local_len;
     return 0;
@@ -784,7 +784,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
     struct schan_context *ctx;
     struct schan_buffers *out_buffers;
     struct schan_credentials *cred;
-    SIZE_T expected_size = ~0UL;
+    SIZE_T expected_size = ~((SIZE_T)0);
     SECURITY_STATUS ret;
 
     TRACE("%p %p %s 0x%08x %d %d %p %d %p %p %p %p\n", phCredential, phContext,
@@ -877,11 +877,11 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextW(
         if (!expected_size)
         {
             TRACE("Expected at least %lu bytes, but buffer only contains %u bytes.\n",
-                    max(6, record_size), buffer->cbBuffer);
+                    (unsigned long)max(6, record_size), buffer->cbBuffer);
             return SEC_E_INCOMPLETE_MESSAGE;
         }
 
-        TRACE("Using expected_size %lu.\n", expected_size);
+        TRACE("Using expected_size %lu.\n", (unsigned long)expected_size);
 
         ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX);
     }
@@ -1024,7 +1024,7 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
                 unsigned int message_size = schan_imp_get_max_message_size(ctx->session);
 
                 TRACE("Using %lu mac bytes, message size %u, block size %u\n",
-                        mac_size, message_size, block_size);
+                        (unsigned long)mac_size, message_size, block_size);
 
                 /* These are defined by the TLS RFC */
                 stream_sizes->cbHeader = 5;
@@ -1203,7 +1203,7 @@ static SECURITY_STATUS SEC_ENTRY schan_EncryptMessage(PCtxtHandle context_handle
     SECURITY_STATUS status;
     SecBuffer *buffer;
     SIZE_T data_size;
-    SIZE_T length;
+    size_t length;
     char *data;
     int idx;
 
@@ -1235,7 +1235,7 @@ static SECURITY_STATUS SEC_ENTRY schan_EncryptMessage(PCtxtHandle context_handle
     length = data_size;
     status = schan_imp_send(ctx->session, data, &length);
 
-    TRACE("Sent %ld bytes.\n", length);
+    TRACE("Sent %ld bytes.\n", (long)length);
 
     if (length != data_size)
         status = SEC_E_INTERNAL_ERROR;
@@ -1364,7 +1364,7 @@ static SECURITY_STATUS SEC_ENTRY schan_DecryptMessage(PCtxtHandle context_handle
 
     while (received < data_size)
     {
-        SIZE_T length = data_size - received;
+        size_t length = data_size - received;
         SECURITY_STATUS status = schan_imp_recv(ctx->session, data + received, &length);
 
         if (status == SEC_I_CONTINUE_NEEDED)
@@ -1383,7 +1383,7 @@ static SECURITY_STATUS SEC_ENTRY schan_DecryptMessage(PCtxtHandle context_handle
         received += length;
     }
 
-    TRACE("Received %ld bytes\n", received);
+    TRACE("Received %ld bytes\n", (long)received);
 
     memcpy(buf_ptr + 5, data, received);
     heap_free(data);

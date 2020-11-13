@@ -363,11 +363,32 @@ static HRESULT WINAPI IPersistFile_fnSave(IPersistFile* iface, LPCOLESTR pszFile
     IPersistStream *StreamThis = &This->IPersistStream_iface;
     HRESULT r;
     IStream *stm;
+    static const WCHAR wszIEStartMenuHardCoded[] = {'C',':','\\','W','i','n','d','o','w','s','\\','S','t','a','r','t',' ','M','e','n','u','\\','P','r','o','g','r','a','m','s','\\','I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r','.','l','n','k',0};
+    static const WCHAR wszIEDesktopHardCoded[] = {'C',':','\\','W','i','n','d','o','w','s','\\','D','e','s','k','t','o','p','\\','I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r','.','l','n','k',0};
+    WCHAR buffer[MAX_PATH];
 
     TRACE("(%p)->(%s)\n",This,debugstr_w(pszFileName));
 
     if (!pszFileName)
         return E_FAIL;
+
+    /* CrossOver HACK! The IE 6 installer hardcodes these paths (which work on
+     * Win9x), but don't in Windows 2000+ and Wine. So fix them up to use the
+     * proper functions to get the directory to save the link into */
+    if (!strcmpW(pszFileName, wszIEStartMenuHardCoded))
+    {
+        r = SHGetFolderPathW(NULL, CSIDL_STARTMENU, NULL, SHGFP_TYPE_CURRENT, buffer);
+        strcatW(buffer, strchrW(strchrW(strchrW(wszIEStartMenuHardCoded, '\\') + 1, '\\') + 1, '\\'));
+        TRACE("changing %s to %s\n", debugstr_w(pszFileName), debugstr_w(buffer));
+        pszFileName = buffer;
+    }
+    else if (!strcmpW(pszFileName, wszIEDesktopHardCoded))
+    {
+        r = SHGetFolderPathW(NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, buffer);
+        strcatW(buffer, strchrW(strchrW(strchrW(wszIEDesktopHardCoded, '\\') + 1, '\\') + 1, '\\'));
+        TRACE("changing %s to %s\n", debugstr_w(pszFileName), debugstr_w(buffer));
+        pszFileName = buffer;
+    }
 
     r = SHCreateStreamOnFileW( pszFileName, STGM_READWRITE | STGM_CREATE | STGM_SHARE_EXCLUSIVE, &stm );
     if( SUCCEEDED( r ) )

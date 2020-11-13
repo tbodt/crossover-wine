@@ -42,9 +42,11 @@ CPPFLAGS        = @CPPFLAGS@
 CROSSCFLAGS     = @CROSSCFLAGS@
 CROSSLDFLAGS    = @CROSSLDFLAGS@
 EXTRACFLAGS     = @EXTRACFLAGS@
+MODULECFLAGS    = @MODULECFLAGS@
 EXTRACROSSCFLAGS= @EXTRACROSSCFLAGS@
 MSVCRTFLAGS     = @MSVCRTFLAGS@
 TARGETFLAGS     = @TARGETFLAGS@
+WIDLFLAGS       = @WIDLFLAGS@
 LDDLLFLAGS      = @LDDLLFLAGS@
 LDEXECFLAGS     = @LDEXECFLAGS@
 LIBS            = @LIBS@
@@ -77,12 +79,14 @@ SED_CMD         = LC_ALL=C sed -e 's,@bindir\@,${bindir},g' -e 's,@dlldir\@,${dl
 LDRPATH_INSTALL = @LDRPATH_INSTALL@
 LDRPATH_LOCAL   = @LDRPATH_LOCAL@
 api_manext      = 3w
+HOSTSTACK_CFLAGS = @HOSTSTACK_CFLAGS@
 WINELOADER_PROGRAMS = @WINELOADER_PROGRAMS@
 WINELOADER_DEPENDS  = @WINELOADER_DEPENDS@
 WINELOADER_LDFLAGS  = @WINELOADER_LDFLAGS@
 WINEPRELOADER_LDFLAGS = @WINEPRELOADER_LDFLAGS@
 LIBWINE_SHAREDLIB   = @LIBWINE_SHAREDLIB@
 LIBWINE_LDFLAGS     = @LIBWINE_LDFLAGS@
+LIBWINE_NAME        = @LIBWINE_NAME@
 LIBWINE_DEPENDS     = @LIBWINE_DEPENDS@
 DISABLED_SUBDIRS    = @DISABLED_SUBDIRS@
 CONFIGURE_TARGETS   = @CONFIGURE_TARGETS@
@@ -107,6 +111,14 @@ include/stamp-h: $(srcdir)/include/config.h.in config.status
 
 distclean:: clean
 	rm -rf autom4te.cache documentation/html documentation/api-guide documentation/api-guide-xml documentation/man$(api_manext)
+
+install-image: install-lib
+# Get rid of the files we don't want in the image
+	rm -rf $(DESTDIR)$(mandir)
+# Rename the wine loader (don't ask)
+	test x$(filter wine,$(WINELOADER_PROGRAMS)) = x || mv $(DESTDIR)$(bindir)/wine $(DESTDIR)$(bindir)/wineloader
+	test x$(filter wine64,$(WINELOADER_PROGRAMS)) = x || mv $(DESTDIR)$(bindir)/wine64 $(DESTDIR)$(bindir)/wineloader64
+	test x$(filter wine32on64,$(WINELOADER_PROGRAMS)) = x || mv $(DESTDIR)$(bindir)/wine32on64 $(DESTDIR)$(bindir)/wineloader32on64
 
 # Rules for API documentation
 

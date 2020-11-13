@@ -31,7 +31,9 @@
 #include "winnls.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
+#define WINE_RBTREE_HOSTADDRSPACE
 #include "wine/rbtree.h"
+#include "wine/winheader_enter.h"
 
 #include "cvconst.h"
 
@@ -47,7 +49,7 @@ struct pool /* poor's man */
 void     pool_init(struct pool* a, size_t arena_size) DECLSPEC_HIDDEN;
 void     pool_destroy(struct pool* a) DECLSPEC_HIDDEN;
 void*    pool_alloc(struct pool* a, size_t len) DECLSPEC_HIDDEN;
-char*    pool_strdup(struct pool* a, const char* str) DECLSPEC_HIDDEN;
+char*    pool_strdup(struct pool* a, const char* HOSTPTR str) DECLSPEC_HIDDEN;
 
 struct vector
 {
@@ -109,7 +111,7 @@ struct hash_table_iter
 };
 
 void     hash_table_iter_init(const struct hash_table* ht,
-                              struct hash_table_iter* hti, const char* name) DECLSPEC_HIDDEN;
+                              struct hash_table_iter* hti, const char* HOSTPTR name) DECLSPEC_HIDDEN;
 void*    hash_table_iter_up(struct hash_table_iter* hti) DECLSPEC_HIDDEN;
 
 
@@ -405,6 +407,7 @@ struct process
     void*                       buffer;
 
     BOOL                        is_64bit;
+    BOOL                        is_32on64;
 };
 
 struct line_info
@@ -585,7 +588,7 @@ extern struct process* process_find_by_handle(HANDLE hProcess) DECLSPEC_HIDDEN;
 extern BOOL         validate_addr64(DWORD64 addr) DECLSPEC_HIDDEN;
 extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* data) DECLSPEC_HIDDEN;
 extern void*        fetch_buffer(struct process* pcs, unsigned size) DECLSPEC_HIDDEN;
-extern const char*  wine_dbgstr_addr(const ADDRESS64* addr) DECLSPEC_HIDDEN;
+extern const char*  HOSTPTR wine_dbgstr_addr(const ADDRESS64* addr) DECLSPEC_HIDDEN;
 extern struct cpu*  cpu_find(DWORD) DECLSPEC_HIDDEN;
 extern DWORD calc_crc32(int fd) DECLSPEC_HIDDEN;
 
@@ -681,9 +684,9 @@ extern BOOL         pe_load_debug_info(const struct process* pcs,
 extern const char*  pe_map_directory(struct module* module, int dirno, DWORD* size) DECLSPEC_HIDDEN;
 
 /* source.c */
-extern unsigned     source_new(struct module* module, const char* basedir, const char* source) DECLSPEC_HIDDEN;
+extern unsigned     source_new(struct module* module, const char* HOSTPTR basedir, const char* HOSTPTR source) DECLSPEC_HIDDEN;
 extern const char*  source_get(const struct module* module, unsigned idx) DECLSPEC_HIDDEN;
-extern int          source_rb_compare(const void *key, const struct wine_rb_entry *entry) DECLSPEC_HIDDEN;
+extern int          source_rb_compare(const void * HOSTPTR key, const struct wine_rb_entry *entry) DECLSPEC_HIDDEN;
 
 /* stabs.c */
 typedef void (*stabs_def_cb)(struct module* module, unsigned long load_offset,
@@ -691,8 +694,8 @@ typedef void (*stabs_def_cb)(struct module* module, unsigned long load_offset,
                                 BOOL is_public, BOOL is_global, unsigned char other,
                                 struct symt_compiland* compiland, void* user);
 extern BOOL         stabs_parse(struct module* module, unsigned long load_offset,
-                                const char* stabs, int stablen,
-                                const char* strs, int strtablen,
+                                const char* HOSTPTR stabs, int stablen,
+                                const char* HOSTPTR strs, int strtablen,
                                 stabs_def_cb callback, void* user) DECLSPEC_HIDDEN;
 
 /* dwarf.c */
@@ -712,7 +715,7 @@ extern DWORD64      sw_module_base(struct cpu_stack_walk* csw, DWORD64 addr) DEC
 extern const char*  symt_get_name(const struct symt* sym) DECLSPEC_HIDDEN;
 extern WCHAR*       symt_get_nameW(const struct symt* sym) DECLSPEC_HIDDEN;
 extern BOOL         symt_get_address(const struct symt* type, ULONG64* addr) DECLSPEC_HIDDEN;
-extern int          symt_cmp_addr(const void* p1, const void* p2) DECLSPEC_HIDDEN;
+extern int          symt_cmp_addr(const void* HOSTPTR p1, const void* HOSTPTR p2) DECLSPEC_HIDDEN;
 extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si) DECLSPEC_HIDDEN;
 extern struct symt_ht*
                     symt_find_nearest(struct module* module, DWORD_PTR addr) DECLSPEC_HIDDEN;
@@ -729,13 +732,13 @@ extern struct symt_public*
 extern struct symt_data*
                     symt_new_global_variable(struct module* module, 
                                              struct symt_compiland* parent,
-                                             const char* name, unsigned is_static,
+                                             const char* HOSTPTR name, unsigned is_static,
                                              struct location loc, unsigned long size,
                                              struct symt* type) DECLSPEC_HIDDEN;
 extern struct symt_function*
                     symt_new_function(struct module* module,
                                       struct symt_compiland* parent,
-                                      const char* name,
+                                      const char* HOSTPTR name,
                                       unsigned long addr, unsigned long size,
                                       struct symt* type) DECLSPEC_HIDDEN;
 extern BOOL         symt_normalize_function(struct module* module, 
@@ -749,7 +752,7 @@ extern struct symt_data*
                                         struct symt_function* func, 
                                         enum DataKind dt, const struct location* loc,
                                         struct symt_block* block,
-                                        struct symt* type, const char* name) DECLSPEC_HIDDEN;
+                                        struct symt* type, const char* HOSTPTR name) DECLSPEC_HIDDEN;
 extern struct symt_block*
                     symt_open_func_block(struct module* module, 
                                          struct symt_function* func,
@@ -764,7 +767,7 @@ extern struct symt_hierarchy_point*
                                             struct symt_function* func,
                                             enum SymTagEnum point, 
                                             const struct location* loc,
-                                            const char* name) DECLSPEC_HIDDEN;
+                                            const char* HOSTPTR name) DECLSPEC_HIDDEN;
 extern BOOL         symt_fill_func_line_info(const struct module* module,
                                              const struct symt_function* func,
                                              DWORD64 addr, IMAGEHLP_LINE64* line) DECLSPEC_HIDDEN;
@@ -772,17 +775,17 @@ extern BOOL         symt_get_func_line_next(const struct module* module, PIMAGEH
 extern struct symt_thunk*
                     symt_new_thunk(struct module* module, 
                                    struct symt_compiland* parent,
-                                   const char* name, THUNK_ORDINAL ord,
+                                   const char* HOSTPTR name, THUNK_ORDINAL ord,
                                    unsigned long addr, unsigned long size) DECLSPEC_HIDDEN;
 extern struct symt_data*
                     symt_new_constant(struct module* module,
                                       struct symt_compiland* parent,
-                                      const char* name, struct symt* type,
+                                      const char* HOSTPTR name, struct symt* type,
                                       const VARIANT* v) DECLSPEC_HIDDEN;
 extern struct symt_hierarchy_point*
                     symt_new_label(struct module* module,
                                    struct symt_compiland* compiland,
-                                   const char* name, unsigned long address) DECLSPEC_HIDDEN;
+                                   const char* HOSTPTR name, unsigned long address) DECLSPEC_HIDDEN;
 extern struct symt* symt_index2ptr(struct module* module, DWORD id) DECLSPEC_HIDDEN;
 extern DWORD        symt_ptr2index(struct module* module, const struct symt* sym) DECLSPEC_HIDDEN;
 
@@ -792,23 +795,23 @@ extern BOOL         symt_get_info(struct module* module, const struct symt* type
                                   IMAGEHLP_SYMBOL_TYPE_INFO req, void* pInfo) DECLSPEC_HIDDEN;
 extern struct symt_basic*
                     symt_new_basic(struct module* module, enum BasicType, 
-                                   const char* typename, unsigned size) DECLSPEC_HIDDEN;
+                                   const char* HOSTPTR typename, unsigned size) DECLSPEC_HIDDEN;
 extern struct symt_udt*
-                    symt_new_udt(struct module* module, const char* typename,
+                    symt_new_udt(struct module* module, const char* HOSTPTR typename,
                                  unsigned size, enum UdtKind kind) DECLSPEC_HIDDEN;
 extern BOOL         symt_set_udt_size(struct module* module,
                                       struct symt_udt* type, unsigned size) DECLSPEC_HIDDEN;
 extern BOOL         symt_add_udt_element(struct module* module, 
                                          struct symt_udt* udt_type, 
-                                         const char* name,
+                                         const char* HOSTPTR name,
                                          struct symt* elt_type, unsigned offset, 
                                          unsigned size) DECLSPEC_HIDDEN;
 extern struct symt_enum*
-                    symt_new_enum(struct module* module, const char* typename,
+                    symt_new_enum(struct module* module, const char* HOSTPTR typename,
                                   struct symt* basetype) DECLSPEC_HIDDEN;
 extern BOOL         symt_add_enum_element(struct module* module, 
                                           struct symt_enum* enum_type, 
-                                          const char* name, int value) DECLSPEC_HIDDEN;
+                                          const char* HOSTPTR name, int value) DECLSPEC_HIDDEN;
 extern struct symt_array*
                     symt_new_array(struct module* module, int min, int max, 
                                    struct symt* base, struct symt* index) DECLSPEC_HIDDEN;
@@ -825,4 +828,6 @@ extern struct symt_pointer*
                                      unsigned long size) DECLSPEC_HIDDEN;
 extern struct symt_typedef*
                     symt_new_typedef(struct module* module, struct symt* ref, 
-                                     const char* name) DECLSPEC_HIDDEN;
+                                     const char* HOSTPTR name) DECLSPEC_HIDDEN;
+
+#include "wine/winheader_exit.h"

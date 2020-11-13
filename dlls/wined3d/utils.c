@@ -2391,7 +2391,7 @@ static void draw_test_quad(struct wined3d_caps_gl_ctx *ctx, const struct wined3d
         "{\n"
         "    gl_FragData[0] = out_color;\n"
         "}\n";
-    const char *source[2];
+    const char *WINED3DPTR source[2];
     GLuint vs_id, fs_id;
     unsigned int i;
 
@@ -6227,7 +6227,7 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
         }
     }
     settings->sRGB_write = !d3d_info->srgb_write_control && needs_srgb_write(context, state, state->fb);
-    if (d3d_info->vs_clipping || !use_vs(state) || !state->render_states[WINED3D_RS_CLIPPING]
+    if (!d3d_info->emulated_clipplanes || !state->render_states[WINED3D_RS_CLIPPING]
             || !state->render_states[WINED3D_RS_CLIPPLANEENABLE])
     {
         /* No need to emulate clipplanes if GL supports native vertex shader clipping or if
@@ -6562,6 +6562,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         settings->flatshading = FALSE;
 
     settings->swizzle_map = si->swizzle_map;
+    settings->emulated_clipplanes = find_emulated_clipplanes(context, state);
 }
 
 int wined3d_ffp_vertex_program_key_compare(const void *key, const struct wine_rb_entry *entry)

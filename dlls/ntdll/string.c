@@ -33,11 +33,14 @@
 #include "windef.h"
 #include "winternl.h"
 
+#include "wine/library.h"
+#undef strncpy
+
 
 /*********************************************************************
  *                  memchr   (NTDLL.@)
  */
-void * __cdecl NTDLL_memchr( const void *ptr, int c, size_t n )
+void * __cdecl NTDLL_memchr( const void *ptr, int c, SIZE_T n )
 {
     return memchr( ptr, c, n );
 }
@@ -46,7 +49,7 @@ void * __cdecl NTDLL_memchr( const void *ptr, int c, size_t n )
 /*********************************************************************
  *                  memcmp   (NTDLL.@)
  */
-int __cdecl NTDLL_memcmp( const void *ptr1, const void *ptr2, size_t n )
+int __cdecl NTDLL_memcmp( const void *ptr1, const void *ptr2, SIZE_T n )
 {
     return memcmp( ptr1, ptr2, n );
 }
@@ -58,7 +61,7 @@ int __cdecl NTDLL_memcmp( const void *ptr1, const void *ptr2, size_t n )
  * NOTES
  *  Behaves like memmove.
  */
-void * __cdecl NTDLL_memcpy( void *dst, const void *src, size_t n )
+void * __cdecl NTDLL_memcpy( void *dst, const void *src, SIZE_T n )
 {
     return memmove( dst, src, n );
 }
@@ -67,7 +70,7 @@ void * __cdecl NTDLL_memcpy( void *dst, const void *src, size_t n )
 /*********************************************************************
  *                  memmove   (NTDLL.@)
  */
-void * __cdecl NTDLL_memmove( void *dst, const void *src, size_t n )
+void * __cdecl NTDLL_memmove( void *dst, const void *src, SIZE_T n )
 {
     return memmove( dst, src, n );
 }
@@ -76,7 +79,7 @@ void * __cdecl NTDLL_memmove( void *dst, const void *src, size_t n )
 /*********************************************************************
  *                  memset   (NTDLL.@)
  */
-void * __cdecl NTDLL_memset( void *dst, int c, size_t n )
+void * __cdecl NTDLL_memset( void *dst, int c, SIZE_T n )
 {
     return memset( dst, c, n );
 }
@@ -121,7 +124,7 @@ char * __cdecl NTDLL_strcpy( char *dst, const char *src )
 /*********************************************************************
  *                  strcspn   (NTDLL.@)
  */
-size_t __cdecl NTDLL_strcspn( const char *str, const char *reject )
+SIZE_T __cdecl NTDLL_strcspn( const char *str, const char *reject )
 {
     return strcspn( str, reject );
 }
@@ -130,7 +133,7 @@ size_t __cdecl NTDLL_strcspn( const char *str, const char *reject )
 /*********************************************************************
  *                  strlen   (NTDLL.@)
  */
-size_t __cdecl NTDLL_strlen( const char *str )
+SIZE_T __cdecl NTDLL_strlen( const char *str )
 {
     return strlen( str );
 }
@@ -139,7 +142,7 @@ size_t __cdecl NTDLL_strlen( const char *str )
 /*********************************************************************
  *                  strncat   (NTDLL.@)
  */
-char * __cdecl NTDLL_strncat( char *dst, const char *src, size_t len )
+char * __cdecl NTDLL_strncat( char *dst, const char *src, SIZE_T len )
 {
     return strncat( dst, src, len );
 }
@@ -148,7 +151,7 @@ char * __cdecl NTDLL_strncat( char *dst, const char *src, size_t len )
 /*********************************************************************
  *                  strncmp   (NTDLL.@)
  */
-int __cdecl NTDLL_strncmp( const char *str1, const char *str2, size_t len )
+int __cdecl NTDLL_strncmp( const char *str1, const char *str2, SIZE_T len )
 {
     return strncmp( str1, str2, len );
 }
@@ -157,7 +160,7 @@ int __cdecl NTDLL_strncmp( const char *str1, const char *str2, size_t len )
 /*********************************************************************
  *                  strncpy   (NTDLL.@)
  */
-char * __cdecl NTDLL_strncpy( char *dst, const char *src, size_t len )
+char * __cdecl NTDLL_strncpy( char *dst, const char *src, SIZE_T len )
 {
     return strncpy( dst, src, len );
 }
@@ -166,7 +169,7 @@ char * __cdecl NTDLL_strncpy( char *dst, const char *src, size_t len )
 /*********************************************************************
  *                  strnlen   (NTDLL.@)
  */
-size_t __cdecl NTDLL_strnlen( const char *str, size_t len )
+SIZE_T __cdecl NTDLL_strnlen( const char *str, SIZE_T len )
 {
     return strnlen( str, len );
 }
@@ -193,7 +196,7 @@ char * __cdecl NTDLL_strrchr( const char *str, int c )
 /*********************************************************************
  *                  strspn   (NTDLL.@)
  */
-size_t __cdecl NTDLL_strspn( const char *str, const char *accept )
+SIZE_T __cdecl NTDLL_strspn( const char *str, const char *accept )
 {
     return strspn( str, accept );
 }
@@ -211,9 +214,9 @@ char * __cdecl NTDLL_strstr( const char *haystack, const char *needle )
 /*********************************************************************
  *                  _memccpy   (NTDLL.@)
  */
-void * __cdecl _memccpy( void *dst, const void *src, int c, size_t n )
+void * __cdecl _memccpy( void *dst, const void *src, int c, SIZE_T n )
 {
-    return memccpy( dst, src, c, n );
+    return ADDRSPACECAST(void * WIN32PTR, memccpy( dst, src, c, n ));
 }
 
 
@@ -260,7 +263,16 @@ INT __cdecl _memicmp( LPCSTR s1, LPCSTR s2, DWORD len )
 /*********************************************************************
  *                  _strnicmp   (NTDLL.@)
  */
-int __cdecl _strnicmp( LPCSTR str1, LPCSTR str2, size_t n )
+#ifdef __i386_on_x86_64__
+int __cdecl _strnicmp( LPCSTR str1, LPCSTR str2, unsigned __int3264 n )
+{
+	return _strnicmp( (const char * HOSTPTR)str1, (const char * HOSTPTR)str2, n);
+}
+
+int __cdecl _strnicmp( const char * HOSTPTR str1, const char * HOSTPTR str2, unsigned __int3264 n) __attribute__((overloadable))
+#else
+int __cdecl _strnicmp( LPCSTR str1, LPCSTR str2, unsigned __int3264 n )
+#endif
 {
     int l1, l2;
 
@@ -270,7 +282,7 @@ int __cdecl _strnicmp( LPCSTR str1, LPCSTR str2, size_t n )
         l2 = (unsigned char)NTDLL_tolower(*str2);
         if (l1 != l2)
         {
-            if (sizeof(void *) > sizeof(int)) return l1 - l2;
+            if (wine_is_64bit()) return l1 - l2;
             return l1 - l2 > 0 ? 1 : -1;
         }
         if (!l1) return 0;
@@ -508,7 +520,11 @@ int CDECL NTDLL__tolower(int c)
  */
 LONG __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
 {
-    return strtol( nptr, endptr, base );
+    char * HOSTPTR hostendptr;
+    LONG result = strtol( nptr, &hostendptr, base );
+    if (endptr)
+        *endptr = ADDRSPACECAST(char * WIN32PTR, hostendptr);
+    return result;
 }
 
 
@@ -517,7 +533,11 @@ LONG __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
  */
 ULONG __cdecl NTDLL_strtoul( const char *nptr, char **endptr, int base )
 {
-    return strtoul( nptr, endptr, base );
+    char * HOSTPTR hostendptr;
+    ULONG result = strtoul( nptr, &hostendptr, base );
+    if (endptr)
+        *endptr = ADDRSPACECAST(char * WIN32PTR, hostendptr);
+    return result;
 }
 
 
@@ -898,7 +918,7 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
             {
             case 'p':
             case 'P': /* pointer. */
-                if (sizeof(void *) == sizeof(LONGLONG)) I64_prefix = TRUE;
+                if (wine_is_64bit()) I64_prefix = TRUE;
                 /* fall through */
             case 'x':
             case 'X': /* hexadecimal integer. */

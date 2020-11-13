@@ -239,6 +239,31 @@ DECLSPEC_HIDDEN void __RPC_USER MACHINE_HANDLEW_unbind(MACHINE_HANDLEW MachineNa
     RpcBindingFree(&h);
 }
 
+/* CROSSOVER HACK: Office 2000 setup installs native rpcrt4 and then uses
+ * services functions which fail (due to bugs in the string binding functions
+ * causing {NULL, "\\pipe\\svcctl"} to be transformed to "\\\\\\pipe\\svcctl"
+ * instead of "\\\\.\\pipe\\svctl") and causes I_RpcExceptionFilter to be used.
+ * Unfortunately, this function isn't available in the version of rpcrt4 that
+ * it installs and so we replace it with a non-imported version of it below */
+int WINAPI I_RpcExceptionFilter(ULONG ExceptionCode)
+{
+    TRACE("0x%x\n", ExceptionCode);
+    switch (ExceptionCode)
+    {
+    case STATUS_DATATYPE_MISALIGNMENT:
+    case STATUS_BREAKPOINT:
+    case STATUS_ACCESS_VIOLATION:
+    case STATUS_ILLEGAL_INSTRUCTION:
+    case STATUS_PRIVILEGED_INSTRUCTION:
+    case 0xC00000AA /*STATUS_INSTRUCTION_MISALIGNMENT*/:
+    case STATUS_STACK_OVERFLOW:
+    case 0xC0000194 /*STATUS_POSSIBLE_DEADLOCK*/:
+        return EXCEPTION_CONTINUE_SEARCH;
+    default:
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+}
+
 DECLSPEC_HIDDEN handle_t __RPC_USER SVCCTL_HANDLEW_bind(SVCCTL_HANDLEW MachineName)
 {
     return rpc_wstr_bind((RPC_WSTR)MachineName);

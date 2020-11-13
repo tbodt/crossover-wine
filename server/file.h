@@ -103,6 +103,7 @@ extern int is_fd_signaled( struct fd *fd );
 extern char *dup_fd_name( struct fd *root, const char *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
+extern struct esync_fd *default_fd_get_esync_fd( struct object *obj, enum esync_type *type );
 extern unsigned int default_fd_map_access( struct object *obj, unsigned int access );
 extern int default_fd_get_poll_events( struct fd *fd );
 extern void default_poll_event( struct fd *fd, int event );
@@ -152,6 +153,10 @@ extern mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner
 
 /* file mapping functions */
 
+extern struct object *create_mapping( struct object *root, const struct unicode_str *name,
+                                      unsigned int attr, mem_size_t size, unsigned int flags,
+                                      obj_handle_t handle, unsigned int file_access,
+                                      const struct security_descriptor *sd );
 extern struct mapping *get_mapping_obj( struct process *process, obj_handle_t handle,
                                         unsigned int access );
 extern struct file *get_mapping_file( struct process *process, client_ptr_t base,

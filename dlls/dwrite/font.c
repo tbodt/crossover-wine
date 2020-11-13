@@ -472,6 +472,29 @@ void fontface_detach_from_cache(IDWriteFontFace5 *iface)
     fontface->cached = NULL;
 }
 
+static BOOL is_same_fontfile(IDWriteFontFile *left, IDWriteFontFile *right)
+{
+    UINT32 left_key_size, right_key_size;
+    const void *left_key, *right_key;
+    HRESULT hr;
+
+    if (left == right)
+        return TRUE;
+
+    hr = IDWriteFontFile_GetReferenceKey(left, &left_key, &left_key_size);
+    if (FAILED(hr))
+        return FALSE;
+
+    hr = IDWriteFontFile_GetReferenceKey(right, &right_key, &right_key_size);
+    if (FAILED(hr))
+        return FALSE;
+
+    if (left_key_size != right_key_size)
+        return FALSE;
+
+    return !memcmp(left_key, right_key, left_key_size);
+}
+
 static HRESULT WINAPI dwritefontface_QueryInterface(IDWriteFontFace5 *iface, REFIID riid, void **obj)
 {
     struct dwrite_fontface *fontface = impl_from_IDWriteFontFace5(iface);
@@ -783,7 +806,8 @@ static HRESULT WINAPI dwritefontface_GetRecommendedRenderingMode(IDWriteFontFace
 
     ppem = emSize * ppdip;
 
-    if (ppem >= RECOMMENDED_OUTLINE_AA_THRESHOLD) {
+    /* CXHACK: disable outline rendering mode to workaround d2d issue, see bug 14558, bug 14721 */
+    if (0 && ppem >= RECOMMENDED_OUTLINE_AA_THRESHOLD) {
         *mode = DWRITE_RENDERING_MODE_OUTLINE;
         return S_OK;
     }
@@ -1446,6 +1470,22 @@ static HRESULT WINAPI dwritefontface5_GetFontResource(IDWriteFontFace5 *iface, I
     return IDWriteFactory7_CreateFontResource(fontface->factory, fontface->files[0], fontface->index, resource);
 }
 
+static BOOL WINAPI dwritefontface5_Equals(IDWriteFontFace5 *iface, IDWriteFontFace *other)
+{
+    struct dwrite_fontface *fontface = impl_from_IDWriteFontFace5(iface), *other_face;
+
+    TRACE("%p, %p.\n", iface, other);
+
+    if (!(other_face = unsafe_impl_from_IDWriteFontFace(other)))
+        return FALSE;
+
+    /* TODO: add variations support */
+
+    return fontface->index == other_face->index &&
+            fontface->simulations == other_face->simulations &&
+            is_same_fontfile(fontface->files[0], other_face->files[0]);
+}
+
 static const IDWriteFontFace5Vtbl dwritefontfacevtbl =
 {
     dwritefontface_QueryInterface,
@@ -1505,6 +1545,7 @@ static const IDWriteFontFace5Vtbl dwritefontfacevtbl =
     dwritefontface5_GetFontAxisValues,
     dwritefontface5_HasVariations,
     dwritefontface5_GetFontResource,
+    dwritefontface5_Equals,
 };
 
 static HRESULT get_fontface_from_font(struct dwrite_font *font, IDWriteFontFace5 **fontface)
@@ -2691,29 +2732,6 @@ static HRESULT WINAPI dwritefontcollection_FindFamilyName(IDWriteFontCollection3
     return S_OK;
 }
 
-static BOOL is_same_fontfile(IDWriteFontFile *left, IDWriteFontFile *right)
-{
-    UINT32 left_key_size, right_key_size;
-    const void *left_key, *right_key;
-    HRESULT hr;
-
-    if (left == right)
-        return TRUE;
-
-    hr = IDWriteFontFile_GetReferenceKey(left, &left_key, &left_key_size);
-    if (FAILED(hr))
-        return FALSE;
-
-    hr = IDWriteFontFile_GetReferenceKey(right, &right_key, &right_key_size);
-    if (FAILED(hr))
-        return FALSE;
-
-    if (left_key_size != right_key_size)
-        return FALSE;
-
-    return !memcmp(left_key, right_key, left_key_size);
-}
-
 static HRESULT WINAPI dwritefontcollection_GetFontFromFontFace(IDWriteFontCollection3 *iface, IDWriteFontFace *face,
         IDWriteFont **font)
 {
@@ -3347,10 +3365,10 @@ struct knownweight_entry {
     DWRITE_FONT_WEIGHT weight;
 };
 
-static int compare_knownweights(const void *a, const void* b)
+static int compare_knownweights(const void * HOSTPTR a, const void* HOSTPTR b)
 {
-    DWRITE_FONT_WEIGHT target = *(DWRITE_FONT_WEIGHT*)a;
-    const struct knownweight_entry *entry = (struct knownweight_entry*)b;
+    DWRITE_FONT_WEIGHT target = *(DWRITE_FONT_WEIGHT* HOSTPTR)a;
+    const struct knownweight_entry * HOSTPTR entry = b;
     int ret = 0;
 
     if (target > entry->weight)
@@ -3368,7 +3386,7 @@ static BOOL is_known_weight_value(DWRITE_FONT_WEIGHT weight, WCHAR *nameW)
     static const WCHAR extrablackW[] = {'E','x','t','r','a',' ','B','l','a','c','k',0};
     static const WCHAR extraboldW[] = {'E','x','t','r','a',' ','B','o','l','d',0};
     static const WCHAR demiboldW[] = {'D','e','m','i',' ','B','o','l','d',0};
-    const struct knownweight_entry *ptr;
+    const struct knownweight_entry * HOSTPTR ptr;
 
     static const struct knownweight_entry knownweights[] = {
         { thinW,       DWRITE_FONT_WEIGHT_THIN },
@@ -3942,6 +3960,10 @@ static void fontcollection_add_replacements(struct dwrite_fontcollection *collec
     WCHAR *name;
     void *data;
     HKEY hkey;
+#ifdef __ANDROID__
+    WCHAR meiryoW[] = {'M','e','i','r','y','o',0};
+    WCHAR meiryo_replacement[] = {'D','r','o','i','d',' ','S','a','n','s',' ','F','a','l','l','b','a','c','k',0};
+#endif
 
     if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts\\Replacements", &hkey))
         return;
@@ -3980,6 +4002,11 @@ static void fontcollection_add_replacements(struct dwrite_fontcollection *collec
     heap_free(data);
     heap_free(name);
     RegCloseKey(hkey);
+
+#ifdef __ANDROID__
+    /* CROSSOVER HACK - bug 14034 */
+    fontcollection_add_replacement(collection, meiryoW, meiryo_replacement);
+#endif
 }
 
 HRESULT create_font_collection(IDWriteFactory7 *factory, IDWriteFontFileEnumerator *enumerator, BOOL is_system,

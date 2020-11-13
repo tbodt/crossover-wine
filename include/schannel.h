@@ -18,6 +18,8 @@
 #ifndef __WINE_SCHANNEL_H__
 #define __WINE_SCHANNEL_H__
 
+#include "wine/winheader_enter.h"
+
 #include <wincrypt.h>
 
 /* Package names */
@@ -249,5 +251,7 @@ typedef struct _SecPkgContext_ConnectionInfo
     ALG_ID aiExch;
     DWORD dwExchStrength;
 } SecPkgContext_ConnectionInfo, *PSecPkgContext_ConnectionInfo;
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SCHANNEL_H__ */

@@ -339,7 +339,7 @@ static const WCHAR SDDL_INHERITED[]          = {'I','D',0};
 static const WCHAR SDDL_AUDIT_SUCCESS[]      = {'S','A',0};
 static const WCHAR SDDL_AUDIT_FAILURE[]      = {'F','A',0};
 
-const char * debugstr_sid(PSID sid)
+const char * HOSTPTR debugstr_sid(PSID sid)
 {
     int auth = 0;
     SID * psid = sid;

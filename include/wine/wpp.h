@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+#include <wine/hostaddrspace_enter.h>
+
 /* Return value == 0 means successful execution */
 extern int wpp_add_define( const char *name, const char *value );
 extern void wpp_del_define( const char *name );
@@ -33,5 +35,7 @@ extern void wpp_set_pedantic( int on );
 extern int wpp_add_include_path( const char *path );
 extern char *wpp_find_include( const char *name, const char *parent_name );
 extern int wpp_parse( const char *input, FILE *output );
+
+#include <wine/hostaddrspace_exit.h>
 
 #endif  /* __WINE_WPP_H */

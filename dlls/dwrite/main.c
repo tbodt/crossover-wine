@@ -520,9 +520,9 @@ void set_en_localizedstring(IDWriteLocalizedStrings *iface, const WCHAR *string)
     }
 }
 
-static int localizedstrings_sorting_compare(const void *left, const void *right)
+static int localizedstrings_sorting_compare(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    const struct localizedpair *_l = left, *_r = right;
+    const struct localizedpair * HOSTPTR _l = left, * HOSTPTR _r = right;
 
     return strcmpW(_l->locale, _r->locale);
 };

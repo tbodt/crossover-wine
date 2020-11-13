@@ -1423,8 +1423,8 @@ UINT WINAPI GetDlgItemInt( HWND hwnd, INT id, BOOL *translated,
                                BOOL fSigned )
 {
     char str[30];
-    char * endptr;
-    LONG_PTR result = 0;
+    char * HOSTPTR endptr;
+    long result = 0;
 
     if (translated) *translated = FALSE;
     if (!SendDlgItemMessageA(hwnd, id, WM_GETTEXT, sizeof(str), (LPARAM)str))

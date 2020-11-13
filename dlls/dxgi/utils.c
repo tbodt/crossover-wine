@@ -378,7 +378,7 @@ enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format)
     }
 }
 
-const char *debug_dxgi_mode(const DXGI_MODE_DESC *desc)
+const char * HOSTPTR debug_dxgi_mode(const DXGI_MODE_DESC *desc)
 {
     if (!desc)
         return "(null)";
@@ -389,7 +389,7 @@ const char *debug_dxgi_mode(const DXGI_MODE_DESC *desc)
             debug_dxgi_format(desc->Format), desc->ScanlineOrdering, desc->Scaling);
 }
 
-const char *debug_dxgi_mode1(const DXGI_MODE_DESC1 *desc)
+const char * HOSTPTR debug_dxgi_mode1(const DXGI_MODE_DESC1 *desc)
 {
     if (!desc)
         return "(null)";

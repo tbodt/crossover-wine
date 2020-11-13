@@ -50,7 +50,7 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION freetype_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-static void *ft_handle = NULL;
+static void * HOSTPTR ft_handle = NULL;
 static FT_Library library = 0;
 static FTC_Manager cache_manager = 0;
 static FTC_CMapCache cmap_cache = 0;
@@ -62,7 +62,7 @@ typedef struct
     FT_Int patch;
 } FT_Version_t;
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
+#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p##f = NULL
 MAKE_FUNCPTR(FT_Done_FreeType);
 MAKE_FUNCPTR(FT_Done_Glyph);
 MAKE_FUNCPTR(FT_Get_First_Char);
@@ -93,8 +93,8 @@ MAKE_FUNCPTR(FTC_Manager_Done);
 MAKE_FUNCPTR(FTC_Manager_LookupFace);
 MAKE_FUNCPTR(FTC_Manager_LookupSize);
 MAKE_FUNCPTR(FTC_Manager_RemoveFaceID);
+MAKE_FUNCPTR(FT_Outline_EmboldenXY);
 #undef MAKE_FUNCPTR
-static FT_Error (*pFT_Outline_EmboldenXY)(FT_Outline *, FT_Pos, FT_Pos);
 
 struct face_finalizer_data
 {
@@ -102,10 +102,10 @@ struct face_finalizer_data
     void *context;
 };
 
-static void face_finalizer(void *object)
+static void face_finalizer(void * HOSTPTR object)
 {
     FT_Face face = object;
-    struct face_finalizer_data *data = (struct face_finalizer_data *)face->generic.data;
+    struct face_finalizer_data * HOSTPTR data = face->generic.data;
 
     IDWriteFontFileStream_ReleaseFileFragment(data->stream, data->context);
     IDWriteFontFileStream_Release(data->stream);
@@ -114,7 +114,7 @@ static void face_finalizer(void *object)
 
 static FT_Error face_requester(FTC_FaceID face_id, FT_Library library, FT_Pointer request_data, FT_Face *face)
 {
-    IDWriteFontFace *fontface = (IDWriteFontFace*)face_id;
+    IDWriteFontFace *fontface = ADDRSPACECAST(void *, face_id);
     IDWriteFontFileStream *stream;
     IDWriteFontFile *file;
     const void *data_ptr;
@@ -330,7 +330,7 @@ static inline void ft_vector_to_d2d_point(const FT_Vector *v, D2D1_POINT_2F offs
     p->y = (v->y / 64.0f) + offset.y;
 }
 
-static void decompose_beginfigure(struct decompose_context *ctxt)
+static void decompose_beginfigure(struct decompose_context * HOSTPTR ctxt)
 {
     D2D1_POINT_2F point;
 
@@ -344,9 +344,9 @@ static void decompose_beginfigure(struct decompose_context *ctxt)
     ctxt->move_to = FALSE;
 }
 
-static int decompose_move_to(const FT_Vector *to, void *user)
+static int decompose_move_to(const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
 
     if (ctxt->figure_started) {
         ID2D1SimplifiedGeometrySink_EndFigure(ctxt->sink, D2D1_FIGURE_END_CLOSED);
@@ -358,9 +358,9 @@ static int decompose_move_to(const FT_Vector *to, void *user)
     return 0;
 }
 
-static int decompose_line_to(const FT_Vector *to, void *user)
+static int decompose_line_to(const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F point;
 
     /* Special case for empty contours, in a way freetype returns them. */
@@ -376,9 +376,9 @@ static int decompose_line_to(const FT_Vector *to, void *user)
     return 0;
 }
 
-static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, void *user)
+static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F points[3];
     FT_Vector cubic[3];
 
@@ -423,9 +423,9 @@ static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, voi
 }
 
 static int decompose_cubic_to(const FT_Vector *control1, const FT_Vector *control2,
-    const FT_Vector *to, void *user)
+    const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F points[3];
 
     decompose_beginfigure(ctxt);
@@ -745,7 +745,7 @@ static BOOL freetype_get_aliased_glyph_bitmap(struct dwrite_glyphbitmap *bitmap,
     }
     else if (glyph->format == FT_GLYPH_FORMAT_BITMAP) {
         FT_Bitmap *ft_bitmap = &((FT_BitmapGlyph)glyph)->bitmap;
-        BYTE *src = ft_bitmap->buffer, *dst = bitmap->buf;
+        BYTE * HOSTPTR src = ft_bitmap->buffer, *dst = bitmap->buf;
         int w = min(bitmap->pitch, (ft_bitmap->width + 7) >> 3);
         int h = min(height, ft_bitmap->rows);
 
@@ -790,7 +790,7 @@ static BOOL freetype_get_aa_glyph_bitmap(struct dwrite_glyphbitmap *bitmap, FT_G
     }
     else if (glyph->format == FT_GLYPH_FORMAT_BITMAP) {
         FT_Bitmap *ft_bitmap = &((FT_BitmapGlyph)glyph)->bitmap;
-        BYTE *src = ft_bitmap->buffer, *dst = bitmap->buf;
+        BYTE * HOSTPTR src = ft_bitmap->buffer, *dst = bitmap->buf;
         int w = min(bitmap->pitch, (ft_bitmap->width + 7) >> 3);
         int h = min(height, ft_bitmap->rows);
 

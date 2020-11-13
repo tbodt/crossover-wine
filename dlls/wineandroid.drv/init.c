@@ -100,6 +100,81 @@ void set_screen_dpi( DWORD dpi )
     }
 }
 
+void handle_run_cmdline( LPWSTR cmdline, LPWSTR* wineEnv )
+{
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    UNICODE_STRING var, val;
+    WCHAR *env = NULL;
+
+    ZeroMemory( &si, sizeof(STARTUPINFOW) );
+    TRACE( "Running windows cmd: : %s\n", debugstr_w( cmdline ) );
+
+    if (wineEnv && !RtlCreateEnvironment( TRUE, &env ))
+    {
+        while (*wineEnv)
+        {
+            RtlInitUnicodeString( &var, *wineEnv++ );
+            RtlInitUnicodeString( &val, *wineEnv++ );
+            RtlSetEnvironmentVariable( &env, &var, &val );
+        }
+    }
+
+    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE,
+                         DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT, env, NULL, &si, &pi ))
+        ERR( "Failed to run cmd : Error %d\n", GetLastError() );
+
+    if (env) RtlDestroyEnvironment( env );
+}
+
+void handle_run_cmdarray( LPWSTR* cmdarray, LPWSTR* wineEnv )
+{
+    int len = 0;
+    int i;
+    WCHAR *ptr, *ptr2;
+    WCHAR *cmdline;
+
+    ptr = cmdarray[0];
+    i = 0;
+    while (ptr != NULL)
+    {
+        len += lstrlenW( ptr ) + 3;
+        i++;
+        ptr = cmdarray[i];
+    }
+
+    cmdline = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+
+    ptr = cmdarray[0];
+    i = 0;
+    ptr2 = cmdline;
+    while (ptr != NULL)
+    {
+        if (ptr[0] != '"')
+        {
+            *ptr2 = '"';
+            ptr2++;
+        }
+        lstrcpyW(ptr2, ptr);
+        ptr2 += lstrlenW(ptr);
+        if (ptr[0] != '"')
+        {
+            *ptr2 = '"';
+            ptr2++;
+        }
+        i++;
+        ptr = cmdarray[i];
+        if (ptr != NULL)
+        {
+            *ptr2 = ' ';
+            ptr2++;
+        }
+    }
+    *ptr2 = 0;
+    handle_run_cmdline( cmdline, wineEnv );
+    HeapFree( GetProcessHeap(), 0, cmdline );
+}
+
 /**********************************************************************
  *	     fetch_display_metrics
  */
@@ -440,6 +515,24 @@ static const JNINativeMethod methods[] =
     { "wine_surface_changed", "(ILandroid/view/Surface;Z)V", surface_changed },
     { "wine_motion_event", "(IIIIII)Z", motion_event },
     { "wine_keyboard_event", "(IIII)Z", keyboard_event },
+    { "wine_clear_meta_key_states", "(I)V", clear_meta_key_states },
+    { "wine_set_focus", "(I)V", set_focus },
+    { "wine_send_syscommand", "(II)V", send_syscommand },
+    { "wine_ime_settext", "(Ljava/lang/String;II)V", ime_text},
+    { "wine_ime_finishtext", "()V", ime_finish},
+    { "wine_ime_canceltext", "()V", ime_cancel},
+    { "wine_ime_start", "()V", ime_start},
+
+    { "wine_send_gamepad_count", "(I)V", gamepad_count},
+    { "wine_send_gamepad_data", "(IILjava/lang/String;)V", gamepad_data},
+    { "wine_send_gamepad_axis", "(I[F)V", gamepad_sendaxis},
+    { "wine_send_gamepad_button", "(III)V", gamepad_sendbutton},
+
+    { "wine_clipdata_update", "(I[Ljava/lang/String;)V", clipdata_update },
+
+    { "wine_run_commandline", "(Ljava/lang/String;[Ljava/lang/String;)V", run_commandline },
+    { "wine_run_commandarray", "([Ljava/lang/String;[Ljava/lang/String;)V", run_commandarray },
+    { "wine_send_window_close", "(I)V", send_window_close}
 };
 
 #define DECL_FUNCPTR(f) typeof(f) * p##f = NULL
@@ -452,6 +545,85 @@ DECL_FUNCPTR( __android_log_print );
 DECL_FUNCPTR( ANativeWindow_fromSurface );
 DECL_FUNCPTR( ANativeWindow_release );
 DECL_FUNCPTR( hw_get_module );
+
+void run_commandline( JNIEnv *env, jobject obj, jobject _cmdline, jobjectArray _wineEnv )
+{
+    union event_data data;
+    const jchar* cmdline = (*env)->GetStringChars(env, _cmdline, 0);
+    jsize len = (*env)->GetStringLength( env, _cmdline );
+    int j;
+    
+    memset( &data, 0, sizeof(data) );
+    data.type = RUN_CMDLINE;
+    data.runcmd.cmdline = malloc( sizeof(WCHAR) * (len + 1) );
+    lstrcpynW( data.runcmd.cmdline, (WCHAR*)cmdline, len + 1 );
+    (*env)->ReleaseStringChars(env, _cmdline, cmdline);
+
+    if (_wineEnv)
+    {
+        int count = (*env)->GetArrayLength( env, _wineEnv );
+
+        data.runcmd.env = malloc( sizeof(LPWSTR*) * (count + 1) );
+        for (j = 0; j < count; j++)
+        {
+            jobject s = (*env)->GetObjectArrayElement( env, _wineEnv, j );
+            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
+            len = (*env)->GetStringLength( env, s );
+            data.runcmd.env[j] = malloc( sizeof(WCHAR) * (len + 1) );
+            lstrcpynW( data.runcmd.env[j], (WCHAR*)key_val_str, len + 1 );
+            (*env)->ReleaseStringChars( env, s, key_val_str );
+        }
+        data.runcmd.env[j] = 0;
+    }
+
+    send_event( &data );
+}
+
+void run_commandarray( JNIEnv *env, jobject obj, jobjectArray _cmdarray, jobjectArray _wineEnv )
+{
+    union event_data data;
+    int j;
+    jsize len;
+
+    memset( &data, 0, sizeof(data) );
+    data.type = RUN_CMDARRAY;
+
+    if (_cmdarray)
+    {
+        int count = (*env)->GetArrayLength( env, _cmdarray);
+
+        data.runcmdarr.cmdarray = malloc( sizeof(LPWSTR*) * (count + 1) );
+        for (j = 0; j < count; j++)
+        {
+            jobject s = (*env)->GetObjectArrayElement( env, _cmdarray, j );
+            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
+            len = (*env)->GetStringLength( env, s );
+            data.runcmdarr.cmdarray[j] = malloc( sizeof(WCHAR) * (len + 1) );
+            lstrcpynW( data.runcmdarr.cmdarray[j], (WCHAR*)key_val_str, len + 1 );
+            (*env)->ReleaseStringChars( env, s, key_val_str );
+        }
+        data.runcmdarr.cmdarray[j] = 0;
+    }
+
+    if (_wineEnv)
+    {
+        int count = (*env)->GetArrayLength( env, _wineEnv );
+
+        data.runcmdarr.env = malloc( sizeof(LPWSTR*) * (count + 1) );
+        for (j = 0; j < count; j++)
+        {
+            jobject s = (*env)->GetObjectArrayElement( env, _wineEnv, j );
+            const jchar *key_val_str = (*env)->GetStringChars( env, s, NULL );
+            len = (*env)->GetStringLength( env, s );
+            data.runcmdarr.env[j] = malloc( sizeof(WCHAR) * (len + 1) );
+            lstrcpynW( data.runcmdarr.env[j], (WCHAR*)key_val_str, len + 1 );
+            (*env)->ReleaseStringChars( env, s, key_val_str );
+        }
+        data.runcmdarr.env[j] = 0;
+    }
+
+    send_event( &data );
+}
 
 #ifndef DT_GNU_HASH
 #define DT_GNU_HASH 0x6ffffef5

@@ -43,6 +43,7 @@
 #endif
 
 #include "wine/library.h"
+#define WINE_LIST_HOSTADDRSPACE
 #include "wine/list.h"
 
 struct reserved_area
@@ -185,7 +186,7 @@ static int try_mmap_fixed (void *addr, size_t len, int prot, int flags,
     {
         flags |= MAP_FIXED;
         if (((flags & ~(MAP_NORESERVE | MAP_NOCACHE)) == (MAP_ANON | MAP_FIXED | MAP_PRIVATE)) ||
-            mmap( (void *)result, len, prot, flags, fildes, off ) != MAP_FAILED)
+            mmap( (void *)(uintptr_t)result, len, prot, flags, fildes, off ) != MAP_FAILED)
             return 1;
         mach_vm_deallocate(mach_task_self(),result,len);
     }
@@ -237,7 +238,7 @@ void *wine_anon_mmap( void *start, size_t size, int prot, int flags )
  */
 static inline void reserve_area( void *addr, void *end )
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     static const mach_vm_address_t max_address = VM_MAX_ADDRESS;
 #else
     static const mach_vm_address_t max_address = MACH_VM_MAX_ADDRESS;
@@ -277,7 +278,7 @@ static inline void reserve_area( void *addr, void *end )
             ret = mach_vm_map( mach_task_self(), &alloc_address, hole_size, 0, VM_FLAGS_FIXED,
                                MEMORY_OBJECT_NULL, 0, 0, PROT_NONE, VM_PROT_ALL, VM_INHERIT_COPY );
             if (!ret)
-                wine_mmap_add_reserved_area( (void*)hole_address, hole_size );
+                wine_mmap_add_reserved_area( (void*)(uintptr_t)hole_address, hole_size );
             else if (ret == KERN_NO_SPACE)
             {
                 /* something filled (part of) the hole before we could.
@@ -363,7 +364,7 @@ static inline void reserve_area( void *addr, void *end )
 
 #endif /* __APPLE__ */
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 /***********************************************************************
  *           reserve_malloc_space
  *
@@ -416,7 +417,7 @@ static inline void reserve_dos_area(void)
  */
 void mmap_init(void)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     struct reserved_area *area;
     struct list *ptr;
 #ifndef __APPLE__

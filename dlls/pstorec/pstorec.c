@@ -19,15 +19,20 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
+#include "winerror.h"
 #include "winuser.h"
+#include "winnls.h"
 #include "initguid.h"
 #include "ole2.h"
-#include "pstore.h"
+#include "shlwapi.h"
 
+#include "pstore.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pstores);
@@ -37,6 +42,13 @@ typedef struct
     IPStore IPStore_iface;
     LONG ref;
 } PStore_impl;
+
+
+static const WCHAR szPStoresKey[] = {
+    'S','o','f','t','w','a','r','e','\\',
+    'W','i','n','e','\\','W','i','n','e','\\',
+    'p','s','t','o','r','e','s',0
+};
 
 static inline PStore_impl *impl_from_IPStore(IPStore *iface)
 {
@@ -56,6 +68,30 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD fdwReason, LPVOID fImpLoad)
         break;
     }
     return TRUE;
+}
+
+/* convert a guid to a wide character string */
+static void IPStore_guid2wstr( const GUID *guid, LPWSTR wstr )
+{
+    char str[40];
+
+    sprintf(str, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+           guid->Data1, guid->Data2, guid->Data3,
+           guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+           guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
+    MultiByteToWideChar( CP_ACP, 0, str, -1, wstr, 40 );
+}
+
+static LONG IPStore_OpenRoot( PST_KEY Key, HKEY *hkey )
+{
+    switch( Key )
+    {
+    case PST_KEY_CURRENT_USER:
+        return RegCreateKeyW( HKEY_CURRENT_USER, szPStoresKey, hkey );
+    case PST_KEY_LOCAL_MACHINE:
+        return RegCreateKeyW( HKEY_LOCAL_MACHINE, szPStoresKey, hkey );
+    }
+    return ERROR_INVALID_PARAMETER;
 }
 
 /**************************************************************************
@@ -121,7 +157,7 @@ static ULONG WINAPI PStore_fnRelease(IPStore* iface)
 static HRESULT WINAPI PStore_fnGetInfo( IPStore* iface, PPST_PROVIDERINFO* ppProperties)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -131,7 +167,7 @@ static HRESULT WINAPI PStore_fnGetProvParam( IPStore* iface,
     DWORD dwParam, DWORD* pcbData, BYTE** ppbData, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -141,7 +177,7 @@ static HRESULT WINAPI PStore_fnSetProvParam( IPStore* This,
     DWORD dwParam, DWORD cbData, BYTE* pbData, DWORD* dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -150,10 +186,38 @@ static HRESULT WINAPI PStore_fnSetProvParam( IPStore* This,
 static HRESULT WINAPI PStore_fnCreateType( IPStore* This,
     PST_KEY Key, const GUID* pType, PPST_TYPEINFO pInfo, DWORD dwFlags)
 {
-    FIXME("%p %08x %s %p(%d,%s) %08x\n", This, Key, debugstr_guid(pType),
+    LONG r;
+    HKEY hkey, hkeytype;
+    WCHAR szGuid[40];
+    HRESULT hres = E_FAIL;
+    DWORD dwCreated = 0;
+
+    TRACE("%p %08x %s %p(%d,%s) %08x\n", This, Key, debugstr_guid(pType),
           pInfo, pInfo->cbSize, debugstr_w(pInfo->szDisplayName), dwFlags);
 
-    return E_NOTIMPL;
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return hres;
+
+    IPStore_guid2wstr( pType, szGuid );
+    r = RegCreateKeyExW( hkey, szGuid, 0, NULL, REG_OPTION_NON_VOLATILE,
+                         KEY_ALL_ACCESS, NULL, &hkeytype, &dwCreated );
+    if( r == ERROR_SUCCESS )
+    {
+        if( dwCreated == REG_CREATED_NEW_KEY )
+        {
+            r = RegSetValueW( hkeytype, NULL, REG_SZ, 
+                   pInfo->szDisplayName, lstrlenW( pInfo->szDisplayName ) );
+            if( r == ERROR_SUCCESS )
+                hres = PST_E_OK;
+            RegCloseKey( hkeytype );
+        }
+        else
+            hres = PST_E_TYPE_EXISTS;
+    }
+    RegCloseKey( hkey );
+
+    return hres;
 }
 
 /******************************************************************************
@@ -163,7 +227,7 @@ static HRESULT WINAPI PStore_fnGetTypeInfo( IPStore* This,
     PST_KEY Key, const GUID* pType, PPST_TYPEINFO** ppInfo, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -172,8 +236,24 @@ static HRESULT WINAPI PStore_fnGetTypeInfo( IPStore* This,
 static HRESULT WINAPI PStore_fnDeleteType( IPStore* This,
     PST_KEY Key, const GUID* pType, DWORD dwFlags)
 {
-    FIXME("%p %d %s %08x\n", This, Key, debugstr_guid(pType), dwFlags);
-    return E_NOTIMPL;
+    LONG r;
+    HKEY hkey;
+    WCHAR szGuid[40];
+    HRESULT hres = E_FAIL;
+
+    TRACE("%p %d %s %08x\n", This, Key, debugstr_guid(pType), dwFlags);
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return hres;
+    
+    IPStore_guid2wstr( pType, szGuid );
+    r = SHDeleteKeyW( hkey, szGuid );
+    if( r == ERROR_SUCCESS )
+        hres = PST_E_OK;
+    RegCloseKey( hkey );
+    
+    return hres;
 }
 
 /******************************************************************************
@@ -183,9 +263,40 @@ static HRESULT WINAPI PStore_fnCreateSubtype( IPStore* This,
     PST_KEY Key, const GUID* pType, const GUID* pSubtype,
     PPST_TYPEINFO pInfo, PPST_ACCESSRULESET pRules, DWORD dwFlags)
 {
-    FIXME("%p %08x %s %s %p %p %08x\n", This, Key, debugstr_guid(pType),
+    LONG r;
+    HKEY hkey, hkeysubtype;
+    WCHAR szGuid[80];
+    HRESULT hres = E_FAIL;
+    DWORD dwCreated = 0;
+
+    TRACE("%p %08x %s %s %p %p %08x\n", This, Key, debugstr_guid(pType),
            debugstr_guid(pSubtype), pInfo, pRules, dwFlags);
-    return E_NOTIMPL;
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return E_FAIL;
+    
+    IPStore_guid2wstr( pType, szGuid );
+    szGuid[38] = '\\';
+    IPStore_guid2wstr( pSubtype, &szGuid[39] );
+    r = RegCreateKeyExW( hkey, szGuid, 0, NULL, REG_OPTION_NON_VOLATILE,
+                         KEY_ALL_ACCESS, NULL, &hkeysubtype, &dwCreated );
+    if( r == ERROR_SUCCESS )
+    {
+        if( dwCreated == REG_CREATED_NEW_KEY )
+        {
+            r = RegSetValueW( hkeysubtype, NULL, REG_SZ, 
+                       pInfo->szDisplayName, lstrlenW( pInfo->szDisplayName ) );
+            if( r == ERROR_SUCCESS )
+                hres = S_OK;
+            RegCloseKey( hkeysubtype );
+        }
+        else
+            hres = PST_E_TYPE_EXISTS;
+    }
+    RegCloseKey( hkey );
+
+    return hres;
 }
 
 /******************************************************************************
@@ -196,7 +307,7 @@ static HRESULT WINAPI PStore_fnGetSubtypeInfo( IPStore* This,
     PPST_TYPEINFO** ppInfo, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -205,9 +316,31 @@ static HRESULT WINAPI PStore_fnGetSubtypeInfo( IPStore* This,
 static HRESULT WINAPI PStore_fnDeleteSubtype( IPStore* This,
     PST_KEY Key, const GUID* pType, const GUID* pSubtype, DWORD dwFlags)
 {
-    FIXME("%p %u %s %s %08x\n", This, Key,
+    LONG r;
+    HKEY hkey, hkeytype;
+    WCHAR szGuid[40];
+    HRESULT hres = E_FAIL;
+
+    TRACE("%p %u %s %s %08x\n", This, Key,
           debugstr_guid(pType), debugstr_guid(pSubtype), dwFlags);
-    return E_NOTIMPL;
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return hres;
+    
+    IPStore_guid2wstr( pType, szGuid );
+    r = RegOpenKeyW( hkey, szGuid, &hkeytype );
+    if( r == ERROR_SUCCESS )
+    {
+        IPStore_guid2wstr( pSubtype, szGuid );
+        r = SHDeleteKeyW( hkeytype, szGuid );
+        if( r == ERROR_SUCCESS )
+            hres = PST_E_OK;
+        RegCloseKey( hkeytype );
+    }
+    RegCloseKey( hkey );
+
+    return hres;
 }
 
 /******************************************************************************
@@ -218,7 +351,7 @@ static HRESULT WINAPI PStore_fnReadAccessRuleset( IPStore* This,
     PPST_ACCESSRULESET** ppRules, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -229,7 +362,7 @@ static HRESULT WINAPI PStore_fnWriteAccessRuleset( IPStore* This,
     PPST_TYPEINFO pInfo, PPST_ACCESSRULESET pRules, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -239,7 +372,7 @@ static HRESULT WINAPI PStore_fnEnumTypes( IPStore* This, PST_KEY Key,
     DWORD dwFlags, IEnumPStoreTypes** ppenum)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -249,7 +382,7 @@ static HRESULT WINAPI PStore_fnEnumSubtypes( IPStore* This, PST_KEY Key,
     const GUID* pType, DWORD dwFlags, IEnumPStoreTypes** ppenum)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -260,7 +393,7 @@ static HRESULT WINAPI PStore_fnDeleteItem( IPStore* This, PST_KEY Key,
     PPST_PROMPTINFO pPromptInfo, DWORD dwFlags)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -270,10 +403,43 @@ static HRESULT WINAPI PStore_fnReadItem( IPStore* This, PST_KEY Key,
     const GUID* pItemType, const GUID* pItemSubtype, LPCWSTR szItemName,
     DWORD *cbData, BYTE** pbData, PPST_PROMPTINFO pPromptInfo, DWORD dwFlags)
 {
-    FIXME("%p %08x %s %s %s %p %p %p %08x\n", This, Key,
-          debugstr_guid(pItemType), debugstr_guid(pItemSubtype),
-          debugstr_w(szItemName), cbData, pbData, pPromptInfo, dwFlags);
-    return E_NOTIMPL;
+    LONG r;
+    HKEY hkey, hkeysubtype;
+    WCHAR szGuid[80];
+    DWORD type;
+
+    TRACE("%p %08x %s %s %s %p %p %p %08x\n", This, Key,
+        debugstr_guid(pItemType), debugstr_guid(pItemSubtype), 
+        debugstr_w(szItemName), cbData, pbData, pPromptInfo, dwFlags);
+
+    *pbData = NULL;
+    *cbData = 0;
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return E_FAIL;
+
+    IPStore_guid2wstr( pItemType, szGuid );
+    szGuid[38] = '\\';
+    IPStore_guid2wstr( pItemSubtype, &szGuid[39] );
+    r = RegOpenKeyW( hkey, szGuid, &hkeysubtype );
+    if( r == ERROR_SUCCESS )
+    {
+        type = 0;
+        r = RegQueryValueExW( hkeysubtype, szItemName, NULL, &type,
+                              NULL, cbData );
+        if( ( r == ERROR_SUCCESS ) && ( type == REG_BINARY ) )
+        {
+            *pbData = CoTaskMemAlloc( *cbData );
+            r = RegQueryValueExW( hkeysubtype, szItemName, NULL, &type,
+                                  *pbData, cbData );
+        }
+        RegCloseKey( hkeysubtype );
+    }
+    
+    RegCloseKey( hkey );
+
+    return ( r == ERROR_SUCCESS ) ? S_OK : E_FAIL;
 }
 
 /******************************************************************************
@@ -284,10 +450,32 @@ static HRESULT WINAPI PStore_fnWriteItem( IPStore* This, PST_KEY Key,
     DWORD cbData, BYTE* ppbData, PPST_PROMPTINFO pPromptInfo,
     DWORD dwDefaultConfirmationStyle, DWORD dwFlags)
 {
-    FIXME("%p %08x %s %s %s %d %p %p %08x\n", This, Key,
-          debugstr_guid(pItemType), debugstr_guid(pItemSubtype),
-          debugstr_w(szItemName), cbData, ppbData, pPromptInfo, dwFlags);
-    return E_NOTIMPL;
+    LONG r;
+    HKEY hkey, hkeysubtype;
+    WCHAR szGuid[80];
+
+    TRACE("%p %08x %s %s %s %d %p %p %08x\n", This, Key,
+        debugstr_guid(pItemType), debugstr_guid(pItemSubtype), 
+        debugstr_w(szItemName), cbData, ppbData, pPromptInfo, dwFlags);
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return E_FAIL;
+
+    IPStore_guid2wstr( pItemType, szGuid );
+    szGuid[38] = '\\';
+    IPStore_guid2wstr( pItemSubtype, &szGuid[39] );
+    r = RegOpenKeyW( hkey, szGuid, &hkeysubtype );
+    if( r == ERROR_SUCCESS )
+    {
+        r = RegSetValueExW( hkeysubtype, szItemName, 0, REG_BINARY, 
+                            ppbData, cbData );
+        RegCloseKey( hkeysubtype );
+    }
+    
+    RegCloseKey( hkey );
+
+    return ( r == ERROR_SUCCESS ) ? S_OK : E_FAIL;
 }
 
 /******************************************************************************
@@ -297,9 +485,37 @@ static HRESULT WINAPI PStore_fnOpenItem( IPStore* This, PST_KEY Key,
     const GUID* pItemType, const GUID* pItemSubtype, LPCWSTR szItemName,
     PST_ACCESSMODE ModeFlags, PPST_PROMPTINFO pPromptInfo, DWORD dwFlags )
 {
-    FIXME("(%p,%08x,%s,%s,%s,%08x,%p,%08x) stub\n", This, Key, debugstr_guid(pItemType),
-           debugstr_guid(pItemSubtype), debugstr_w(szItemName), ModeFlags, pPromptInfo, dwFlags);
-    return E_NOTIMPL;
+    LONG r;
+    HKEY hkey, hkeysubtype;
+    WCHAR szGuid[80];
+
+    TRACE("%p %08x %s %s %p %08x %p %08x\n", This, Key,
+           debugstr_guid(pItemType), debugstr_guid(pItemSubtype),
+           debugstr_w(szItemName), ModeFlags, pPromptInfo, dwFlags);
+
+    r = IPStore_OpenRoot( Key, &hkey );
+    if( r )
+        return E_FAIL;
+
+    IPStore_guid2wstr( pItemType, szGuid );
+    szGuid[38] = '\\';
+    IPStore_guid2wstr( pItemSubtype, &szGuid[39] );
+    r = RegOpenKeyW( hkey, szGuid, &hkeysubtype );
+    if( r == ERROR_SUCCESS )
+    {
+        DWORD type;
+
+        r = RegQueryValueExW( hkeysubtype, szItemName, NULL, &type, 
+                              NULL, NULL );
+        if( ( r == ERROR_SUCCESS ) && ( type != REG_BINARY ) )
+            r = ERROR_INVALID_DATA;
+
+        RegCloseKey( hkeysubtype );
+    }
+    
+    RegCloseKey( hkey );
+
+    return ( r == ERROR_SUCCESS ) ? S_OK : E_FAIL;
 }
 
 /******************************************************************************
@@ -309,8 +525,8 @@ static HRESULT WINAPI PStore_fnCloseItem( IPStore* This, PST_KEY Key,
     const GUID* pItemType, const GUID* pItemSubtype, LPCWSTR* szItemName,
     DWORD dwFlags)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return S_OK;
 }
 
 /******************************************************************************
@@ -321,7 +537,7 @@ static HRESULT WINAPI PStore_fnEnumItems( IPStore* This, PST_KEY Key,
     IEnumPStoreItems** ppenum)
 {
     FIXME("\n");
-    return E_NOTIMPL;
+    return E_FAIL;
 }
 
 
@@ -372,13 +588,13 @@ HRESULT WINAPI PStoreCreateInstance( IPStore** ppProvider,
 
 HRESULT WINAPI DllRegisterServer(void)
 {
-    FIXME("\n");
+    FIXME("stub\n");
     return S_OK;
 }
 
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    FIXME("\n");
+    FIXME("stub\n");
     return S_OK;
 }
 
@@ -387,7 +603,7 @@ HRESULT WINAPI DllUnregisterServer(void)
  */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
 {
-    FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv);
+    FIXME("(%s,%s,%p) stub\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv);
     return CLASS_E_CLASSNOTAVAILABLE;
 }
 

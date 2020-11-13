@@ -43,13 +43,36 @@
 #include <crt_externs.h>
 #define environ (*_NSGetEnviron())
 #include <CoreFoundation/CoreFoundation.h>
+
 #define LoadResource MacLoadResource
 #define GetCurrentThread MacGetCurrentThread
 #include <CoreServices/CoreServices.h>
 #undef LoadResource
 #undef GetCurrentThread
-#include <pthread.h>
+
+#include <mach-o/dyld_images.h>
+#include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
+#include <mach-o/nlist.h>
+#include <mach/mach_error.h>
+#include <mach/mach.h>
+#include <pthread.h>
+
+/* CrossOver Hack 13438 */
+#define MAKEFUNC(f) static typeof(f) *p##f
+MAKEFUNC(CFNotificationCenterGetDistributedCenter);
+MAKEFUNC(CFRelease);
+MAKEFUNC(CFRunLoopAddSource);
+MAKEFUNC(CFRunLoopGetCurrent);
+MAKEFUNC(CFRunLoopRun);
+MAKEFUNC(CFRunLoopSourceCreate);
+MAKEFUNC(CFRunLoopSourceSignal);
+MAKEFUNC(CFRunLoopStop);
+MAKEFUNC(kCFRunLoopCommonModes);
+MAKEFUNC(MPCurrentTaskID);
+MAKEFUNC(MPTaskIsPreemptive);
+#undef MAKEFUNC
+
 #else
 extern char **environ;
 #endif
@@ -67,7 +90,7 @@ extern char **environ;
 /* argc/argv for the Windows application */
 int __wine_main_argc = 0;
 char **__wine_main_argv = NULL;
-WCHAR **__wine_main_wargv = NULL;
+WCHAR * WIN32PTR * WIN32PTR __wine_main_wargv = NULL;
 char **__wine_main_environ = NULL;
 
 struct dll_path_context
@@ -171,9 +194,11 @@ static int check_library_arch( int fd )
     } header;
 
     if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
-    if (header.magic != 0xfeedface) return 1;
-    if (sizeof(void *) == sizeof(int)) return !(header.cputype >> 24);
-    else return (header.cputype >> 24) == 1; /* CPU_ARCH_ABI64 */
+    if (header.magic != 0xfeedface && header.magic != 0xfeedfacf) return 1;
+    if (sizeof(void *HOSTPTR) == sizeof(int))
+        return header.magic == 0xfeedface && (header.cputype >> 24) == 0;
+    else
+        return header.magic == 0xfeedfacf && (header.cputype >> 24) == 1; /* CPU_ARCH_ABI64 */
 #else
     struct  /* ELF header */
     {
@@ -191,7 +216,7 @@ static int check_library_arch( int fd )
 #else
     if (header.data != 1 /* ELFDATA2LSB */) return 1;
 #endif
-    if (sizeof(void *) == sizeof(int)) return header.class == 1; /* ELFCLASS32 */
+    if (sizeof(void *HOSTPTR) == sizeof(int)) return header.class == 1; /* ELFCLASS32 */
     else return header.class == 2; /* ELFCLASS64 */
 #endif
 }
@@ -301,11 +326,11 @@ static void *dlopen_dll( const char *name, char *error, int errorsize,
 /* adjust an array of pointers to make them into RVAs */
 static inline void fixup_rva_ptrs( void *array, BYTE *base, unsigned int count )
 {
-    void **src = (void **)array;
+    BYTE * WIN32PTR *src = (BYTE * WIN32PTR *)array;
     DWORD *dst = (DWORD *)array;
     while (count--)
     {
-        *dst++ = *src ? (BYTE *)*src - base : 0;
+        *dst++ = *src ? *src - base : 0;
         src++;
     }
 }
@@ -329,6 +354,14 @@ static inline void fixup_rva_names( UINT_PTR *ptr, int delta )
         if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
         ptr++;
     }
+#ifdef __i386_on_x86_64__
+    ptr++;
+    while (*ptr)
+    {
+        if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
+        ptr++;
+    }
+#endif
 }
 
 
@@ -355,7 +388,11 @@ static void fixup_exports( IMAGE_EXPORT_DIRECTORY *dir, BYTE *base, int delta )
     fixup_rva_dwords( &dir->AddressOfNames, delta, 1 );
     fixup_rva_dwords( &dir->AddressOfNameOrdinals, delta, 1 );
     fixup_rva_dwords( (DWORD *)(base + dir->AddressOfNames), delta, dir->NumberOfNames );
+#ifdef __i386_on_x86_64__
+    fixup_rva_ptrs( (base + dir->AddressOfFunctions), base, dir->NumberOfFunctions * 2 );
+#else
     fixup_rva_ptrs( (base + dir->AddressOfFunctions), base, dir->NumberOfFunctions );
+#endif
 }
 
 
@@ -380,13 +417,13 @@ static void fixup_resources( IMAGE_RESOURCE_DIRECTORY *dir, BYTE *root, int delt
 
 
 /* map a builtin dll in memory and fixup RVAs */
-static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
+static void * WIN32PTR map_dll( const IMAGE_NT_HEADERS *nt_descr )
 {
     IMAGE_DATA_DIRECTORY *dir;
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
     IMAGE_SECTION_HEADER *sec;
-    BYTE *addr;
+    BYTE * WIN32PTR addr;
     DWORD code_start, code_end, data_start, data_end;
     const size_t page_size = sysconf( _SC_PAGESIZE );
     const size_t page_mask = page_size - 1;
@@ -404,8 +441,12 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     assert( size <= page_size );
 
     /* module address must be aligned on 64K boundary */
-    addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-    if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    addr = *(BYTE * WIN32PTR *)&nt_descr->OptionalHeader.DataDirectory[15];
+    if (!addr || ((ULONG_PTR)addr & 0xffff) || mprotect( addr, page_size, PROT_READ | PROT_WRITE ))
+    {
+        addr = (BYTE * WIN32PTR)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+        if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    }
 
     dos    = (IMAGE_DOS_HEADER *)addr;
     nt     = (IMAGE_NT_HEADERS *)(dos + 1);
@@ -452,13 +493,22 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     nt->OptionalHeader.SizeOfImage                 = data_end;
     nt->OptionalHeader.ImageBase                   = (ULONG_PTR)addr;
 
+    /* Clear DataDirectory[15] */
+
+    nt->OptionalHeader.DataDirectory[15].VirtualAddress = 0;
+    nt->OptionalHeader.DataDirectory[15].Size = 0;
+
     /* Build the code section */
 
     memcpy( sec->Name, ".text", sizeof(".text") );
     sec->SizeOfRawData = code_end - code_start;
     sec->Misc.VirtualSize = sec->SizeOfRawData;
     sec->VirtualAddress   = code_start;
-    sec->PointerToRawData = code_start;
+#ifdef _WIN64
+    sec->PointerToRawData = 0x400; /* file alignment */
+#else
+    sec->PointerToRawData = 0x200; /* file alignment */
+#endif
     sec->Characteristics  = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
     sec++;
 
@@ -698,6 +748,87 @@ struct apple_stack_info
 };
 
 /***********************************************************************
+ *           apple_override_bundle_name
+ *
+ * Rewrite the bundle name in the Info.plist embedded in the loader.
+ * This is the only way to control the title of the application menu
+ * when using the Mac driver.  The GUI frameworks call down into Core
+ * Foundation to get the bundle name for that.
+ *
+ * CrossOver Hack 13438
+ */
+static void apple_override_bundle_name( int argc, char *argv[] )
+{
+    char* info_plist;
+    unsigned long remaining;
+    static const char prefix[] = "<key>CFBundleName</key>\n    <string>";
+    const size_t prefix_len = strlen(prefix);
+    static const char suffix[] = "</string>";
+    const size_t suffix_len = strlen(suffix);
+    static const char padding[] = "<!-- bundle name padding -->";
+    const size_t padding_len = strlen(padding);
+    char* bundle_name;
+    const char* p;
+    int bundle_name_len, max_bundle_name_len;
+    uintptr_t start, end;
+    const char* new_bundle_name;
+    int new_bundle_name_len;
+
+    if (argc < 2)
+        return;
+
+    info_plist = getsectdata("__TEXT", "__info_plist", &remaining);
+    if (!info_plist || !remaining)
+        return;
+    info_plist += _dyld_get_image_vmaddr_slide(0);
+
+    bundle_name = strnstr(info_plist, prefix, remaining);
+    if (!bundle_name)
+        return;
+
+    bundle_name += prefix_len;
+    remaining -= bundle_name - info_plist;
+    p = strnstr(bundle_name, suffix, remaining);
+    if (!p)
+        return;
+
+    bundle_name_len = p - bundle_name;
+    remaining -= bundle_name_len + suffix_len;
+
+    max_bundle_name_len = bundle_name_len;
+    if (padding_len <= remaining &&
+        !memcmp(bundle_name + bundle_name_len + suffix_len, padding, padding_len))
+        max_bundle_name_len += padding_len;
+
+    new_bundle_name = argv[1];
+    if ((p = strrchr(new_bundle_name, '\\'))) new_bundle_name = p + 1;
+    if ((p = strrchr(new_bundle_name, '/'))) new_bundle_name = p + 1;
+    if (strspn(new_bundle_name, "0123456789abcdefABCDEF") == 32 &&
+        new_bundle_name[32] == '.')
+        new_bundle_name += 33;
+    if ((p = strrchr(new_bundle_name, '.')) && p != new_bundle_name)
+        new_bundle_name_len = p - new_bundle_name;
+    else
+        new_bundle_name_len = strlen(new_bundle_name);
+    if (!new_bundle_name_len)
+        return;
+
+    start = (uintptr_t)bundle_name;
+    end = (uintptr_t)(bundle_name + max_bundle_name_len + suffix_len);
+    start &= ~(getpagesize() - 1);
+    end = (end + getpagesize() - 1) & ~(getpagesize() - 1);
+    if (mprotect((void*)start, end - start, PROT_READ|PROT_WRITE|PROT_EXEC) == 0)
+    {
+        int copy_len = min(new_bundle_name_len, max_bundle_name_len);
+        memcpy(bundle_name, new_bundle_name, copy_len);
+        memcpy(bundle_name + copy_len, suffix, suffix_len);
+        if (copy_len < max_bundle_name_len)
+            memset(bundle_name + copy_len + suffix_len, ' ', max_bundle_name_len - copy_len);
+        mprotect((void*)start, end - start, PROT_READ|PROT_EXEC);
+    }
+}
+
+/***********************************************************************
  *           apple_alloc_thread_stack
  *
  * Callback for wine_mmap_enum_reserved_areas to allocate space for
@@ -763,7 +894,7 @@ static void apple_create_wine_thread( void *init_func )
      * the run loop allows apple_main_thread() and thus wine_init() to
      * return. */
     if (!success)
-        CFRunLoopStop( CFRunLoopGetCurrent() );
+        pCFRunLoopStop( pCFRunLoopGetCurrent() );
 }
 
 
@@ -777,8 +908,52 @@ static void apple_create_wine_thread( void *init_func )
  */
 static void apple_main_thread( void (*init_func)(void) )
 {
+    void *corefoundation_handle, *coreservices_handle;
+    char error[1024];
     CFRunLoopSourceContext source_context = { 0 };
     CFRunLoopSourceRef source;
+
+    /* CrossOver Hack 13438: dynamically load CoreFoundation and CoreServices */
+    corefoundation_handle = wine_dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+                                        RTLD_LAZY, error, sizeof(error));
+    if (!corefoundation_handle)
+    {
+        fprintf(stderr, "wine: failed to load CoreFoundation; %s\n", error);
+        return;
+    }
+
+#define LOADFUNC(f) if (!(p##f = wine_dlsym(corefoundation_handle, #f, error, sizeof(error)))) \
+                    { \
+                        fprintf(stderr, "wine: failed to load symbol %s; %s\n", #f, error); \
+                        return; \
+                    }
+    LOADFUNC(CFNotificationCenterGetDistributedCenter);
+    LOADFUNC(CFRelease);
+    LOADFUNC(CFRunLoopAddSource);
+    LOADFUNC(CFRunLoopGetCurrent);
+    LOADFUNC(CFRunLoopRun);
+    LOADFUNC(CFRunLoopSourceCreate);
+    LOADFUNC(CFRunLoopSourceSignal);
+    LOADFUNC(CFRunLoopStop);
+    LOADFUNC(kCFRunLoopCommonModes);
+#undef LOADFUNC
+
+    coreservices_handle = wine_dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices",
+                                        RTLD_LAZY, error, sizeof(error));
+    if (!coreservices_handle)
+    {
+        fprintf(stderr, "wine: failed to load CoreServices; %s\n", error);
+        return;
+    }
+
+#define LOADFUNC(f) if (!(p##f = wine_dlsym(coreservices_handle, #f, error, sizeof(error)))) \
+                    { \
+                        fprintf(stderr, "wine: failed to load symbol %s; %s\n", #f, error); \
+                        return; \
+                    }
+    LOADFUNC(MPCurrentTaskID);
+    LOADFUNC(MPTaskIsPreemptive);
+#undef LOADFUNC
 
     if (!pthread_main_np())
     {
@@ -789,12 +964,12 @@ static void apple_main_thread( void (*init_func)(void) )
     /* Multi-processing Services can get confused about the main thread if the
      * first time it's used is on a secondary thread.  Use it here to make sure
      * that doesn't happen. */
-    MPTaskIsPreemptive(MPCurrentTaskID());
+    pMPTaskIsPreemptive(pMPCurrentTaskID());
 
     /* Give ourselves the best chance of having the distributed notification
      * center scheduled on this thread's run loop.  In theory, it's scheduled
      * in the first thread to ask for it. */
-    CFNotificationCenterGetDistributedCenter();
+    pCFNotificationCenterGetDistributedCenter();
 
     /* We use this run loop source for two purposes.  First, a run loop exits
      * if it has no more sources scheduled.  So, we need at least one source
@@ -804,26 +979,184 @@ static void apple_main_thread( void (*init_func)(void) )
      * adding it and have its callback spin off the Wine thread. */
     source_context.info = init_func;
     source_context.perform = apple_create_wine_thread;
-    source = CFRunLoopSourceCreate( NULL, 0, &source_context );
+    source = pCFRunLoopSourceCreate( NULL, 0, &source_context );
 
     if (source)
     {
-        CFRunLoopAddSource( CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes );
-        CFRunLoopSourceSignal( source );
-        CFRelease( source );
+        /* CrossOver Hack 13438 */
+        pCFRunLoopAddSource( pCFRunLoopGetCurrent(), source, *pkCFRunLoopCommonModes );
+        pCFRunLoopSourceSignal( source );
+        pCFRelease( source );
 
-        CFRunLoopRun(); /* Should never return, except on error. */
+        pCFRunLoopRun(); /* Should never return, except on error. */
     }
 
     /* If we get here (i.e. return), that indicates failure to our caller. */
 }
+
+#ifdef __i386_on_x86_64__
+struct dyld_helpers
+{
+    uintptr_t       version;
+    void            *ignored[18];
+    kern_return_t   (*vm_alloc)(vm_map_t task, vm_address_t* addr, vm_size_t size, int flags);
+    void*           (*mmap)(void* addr, size_t len, int prot, int flags, int fd, off_t offset);
+};
+
+static __thread int divert_dyld_allocations;
+
+
+static struct dyld_all_image_infos* get_image_addr(void)
+{
+    struct dyld_all_image_infos *ret = 0;
+    struct task_dyld_info dyld_info;
+    mach_msg_type_number_t size = TASK_DYLD_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_DYLD_INFO, (task_info_t)&dyld_info, &size) == KERN_SUCCESS)
+        ret = (struct dyld_all_image_infos*)dyld_info.all_image_info_addr;
+    return ret;
+}
+
+
+static kern_return_t wine_vm_allocate(vm_map_t task, vm_address_t* addr, vm_size_t size, int flags)
+{
+    kern_return_t ret;
+    vm_address_t base, hint;
+    unsigned int required_flags = VM_FLAGS_ANYWHERE;
+    unsigned int allowed_flags = required_flags | VM_FLAGS_PURGABLE | VM_FLAGS_RANDOM_ADDR |
+                                 VM_FLAGS_NO_CACHE | VM_FLAGS_RESILIENT_CODESIGN |
+                                 VM_FLAGS_RESILIENT_MEDIA | VM_FLAGS_ALIAS_MASK;
+
+    if (!divert_dyld_allocations || task != mach_task_self() ||
+        (flags & required_flags) != required_flags || flags & ~allowed_flags ||
+        size >= 0xfffff000)
+        return vm_allocate(task, addr, size, flags);
+
+    if (0x1000 < (uintptr_t)*addr && (uintptr_t)*addr < (0x100000000 - size))
+        hint = *addr;
+    else
+        hint = 0;
+    while (true)
+    {
+        base = hint ?: (vm_address_t)0x1000;
+        ret = vm_allocate(task, &base, size, flags & ~(unsigned int)VM_FLAGS_RANDOM_ADDR);
+        if (ret == KERN_SUCCESS)
+        {
+            if ((uintptr_t)base < (0x100000000 - size))
+            {
+                *addr = base;
+                return ret;
+            }
+            vm_deallocate(task, base, size);
+            ret = KERN_NO_SPACE;
+        }
+        if (!hint)
+            break;
+        hint = 0;
+    }
+
+    return ret;
+}
+
+
+static void* wine_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset)
+{
+    void *ret, *base, *hint;
+
+    if (!divert_dyld_allocations || flags & (MAP_ANON | MAP_FIXED | MAP_JIT) ||
+        len > 0xfffff000)
+        return mmap(addr, len, prot, flags, fd, offset);
+
+    if (0x1000 < (uintptr_t)addr && (uintptr_t)addr <= (0x100000000 - len))
+        hint = addr;
+    else
+        hint = 0;
+    while (true)
+    {
+        base = hint ?: (void*)0x1000;
+        ret = mmap(base, len, prot, flags, fd, offset);
+        if (ret != MAP_FAILED)
+        {
+            if ((uintptr_t)ret <= (0x100000000 - len))
+                return ret;
+            munmap(ret, len);
+        }
+        if (!hint)
+            break;
+        hint = 0;
+    }
+
+    if (ret != MAP_FAILED)
+        errno = ENOMEM;
+    return MAP_FAILED;
+}
+
+
+void install_dyld_allocation_hooks(void)
+{
+    int i;
+    struct dyld_all_image_infos *info = get_image_addr();
+    const struct mach_header_64 *hdr = (const struct mach_header_64*)info->dyldImageLoadAddress;
+    const struct symtab_command *symbol_table = NULL;
+    const struct load_command *cmd = (const struct load_command*)(hdr + 1);
+    for (i = 0; i < hdr->ncmds; i++)
+    {
+        if (cmd->cmd == LC_SYMTAB)
+        {
+            symbol_table = (const struct symtab_command*)cmd;
+            break;
+        }
+        cmd = (const struct load_command*)((char*)cmd + cmd->cmdsize);
+    }
+    if (!symbol_table)
+        return;
+
+    const struct segment_command_64* symbol_data_segment = NULL;
+    cmd = (const struct load_command*)(hdr + 1);
+    for (i = 0; i < hdr->ncmds; i++)
+    {
+        if (cmd->cmd == LC_SEGMENT_64)
+        {
+            symbol_data_segment = (const void*)cmd;
+            if (symbol_data_segment->fileoff <= symbol_table->symoff &&
+                symbol_table->symoff < symbol_data_segment->fileoff + symbol_data_segment->filesize)
+                break;
+        }
+        cmd = (const struct load_command*)((char*)cmd + cmd->cmdsize);
+    }
+    if (i >= hdr->ncmds)
+        return;
+    size_t symoffset = symbol_table->symoff - symbol_data_segment->fileoff;
+    size_t stroffset = symbol_table->stroff - symbol_data_segment->fileoff;
+    unsigned long size;
+    const uint8_t *base = getsegmentdata(hdr, symbol_data_segment->segname, &size);
+    const struct nlist_64 *nlist = (const void*)(base + symoffset);
+    const char *strings = (const void*)(base + stroffset);
+    for (i = 0; i < symbol_table->nsyms; i++)
+    {
+        if (!nlist[i].n_un.n_strx || nlist[i].n_un.n_strx >= symbol_table->strsize)
+            continue;
+        const char *name = strings + nlist[i].n_un.n_strx;
+        if (!strcmp(name, "__ZN4dyld17gLibSystemHelpersE")) /* dyld::gLibSystemHelpers */
+        {
+            struct dyld_helpers **phelpers = (void*)((char*)hdr + nlist[i].n_value);
+            struct dyld_helpers *helpers = *phelpers;
+            if (helpers->mmap == &mmap && helpers->vm_alloc == &vm_allocate)
+            {
+                helpers->mmap = wine_mmap;
+                helpers->vm_alloc = wine_vm_allocate;
+            }
+            break;
+        }
+    }
+}
+#endif
 #endif
 
 
 #ifdef __ANDROID__
 
 #ifndef WINE_JAVA_CLASS
-#define WINE_JAVA_CLASS "org/winehq/wine/WineActivity"
+#define WINE_JAVA_CLASS "org/winehq/wine/WineDriver"
 #endif
 
 static JavaVM *java_vm;
@@ -964,12 +1297,54 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     set_max_limit( RLIMIT_AS );
 #endif
 
+#ifdef __APPLE__ /* CrossOver Hack 13438 */
+    apple_override_bundle_name(argc, argv);
+#endif
+
+#ifdef __i386_on_x86_64__
+#ifdef __APPLE__
+    {
+        LDT_ENTRY cs32_entry, ds32_entry;
+
+        wine_32on64_cs64 = wine_get_cs();
+        wine_32on64_cs32 = wine_ldt_alloc_entries(2);
+
+        if (!wine_32on64_cs32)
+        {
+            snprintf(error, error_size, "couldn't allocate LDT entries for 32-bit code and data segments\n");
+            return;
+        }
+        wine_ldt_set_base( &cs32_entry, NULL );
+        wine_ldt_set_limit( &cs32_entry, -1 );
+        wine_ldt_set_flags( &cs32_entry, WINE_LDT_FLAGS_CODE | WINE_LDT_FLAGS_32BIT );
+        if (wine_ldt_set_entry( wine_32on64_cs32, &cs32_entry ) < 0)
+        {
+            snprintf(error, error_size, "failed to set the LDT entry for 32-bit code segment\n");
+            return;
+        }
+
+        wine_32on64_ds32 = wine_32on64_cs32 + (1 << 3);
+        wine_ldt_set_base( &ds32_entry, NULL );
+        wine_ldt_set_limit( &ds32_entry, -1 );
+        wine_ldt_set_flags( &ds32_entry, WINE_LDT_FLAGS_DATA | WINE_LDT_FLAGS_32BIT );
+        if (wine_ldt_set_entry( wine_32on64_ds32, &ds32_entry ) < 0)
+        {
+            snprintf(error, error_size, "failed to set the LDT entry for 32-bit data segment\n");
+            return;
+        }
+    }
+#endif
+#endif
+
     wine_init_argv0_path( argv[0] );
     build_dll_path();
     __wine_main_argc = argc;
     __wine_main_argv = argv;
     __wine_main_environ = __wine_get_main_environment();
     mmap_init();
+#if defined(__APPLE__) && defined(__i386_on_x86_64__)
+    install_dyld_allocation_hooks();
+#endif
 
     for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))
     {
@@ -1111,4 +1486,18 @@ int wine_dlclose( void *handle, char *error, size_t errorsize )
     }
     dlerror();
     return ret;
+}
+
+/***********************************************************************
+ *		wine_enable_dlopen_redirect
+ */
+int wine_enable_dlopen_redirect(int enable)
+{
+#if defined(__APPLE__) && defined(__i386_on_x86_64__)
+    int old = divert_dyld_allocations;
+    divert_dyld_allocations = enable;
+    return old;
+#else
+    return 0;
+#endif
 }

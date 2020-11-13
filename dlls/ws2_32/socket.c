@@ -34,6 +34,12 @@
 #include <string.h>
 #include <sys/types.h>
 #include <limits.h>
+#ifdef HAVE_SYS_MMAN_H
+# include <sys/mman.h>
+#endif
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
 #ifdef HAVE_SYS_IPC_H
 # include <sys/ipc.h>
 #endif
@@ -182,6 +188,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
+WINE_DECLARE_DEBUG_CHANNEL(oculus);
 
 /* names of the protocols */
 static const WCHAR NameIpxW[]   = {'I', 'P', 'X', '\0'};
@@ -242,7 +249,7 @@ static struct interface_filter generic_interface_filter = {
 };
 #endif /* LINUX_BOUND_IF */
 
-extern ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags );
+extern ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr * WIN32PTR hdr, int flags );
 
 /*
  * The actual definition of WSASendTo, wrapped in a different function name
@@ -634,9 +641,9 @@ static INT num_startup;          /* reference counter */
 static FARPROC blocking_hook = (FARPROC)WSA_DefaultBlockingHook;
 
 /* function prototypes */
-static struct WS_hostent *WS_create_he(char *name, int aliases, int aliases_size, int addresses, int address_length);
+static struct WS_hostent *WS_create_he(char * HOSTPTR name, int aliases, int aliases_size, int addresses, int address_length);
 static struct WS_hostent *WS_dup_he(const struct hostent* p_he);
-static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot );
+static struct WS_protoent *WS_create_pe( const char * HOSTPTR name, char * HOSTPTR * HOSTPTR aliases, int prot );
 static struct WS_servent *WS_dup_se(const struct servent* p_se);
 static int ws_protocol_info(SOCKET s, int unicode, WSAPROTOCOL_INFOW *buffer, int *size);
 
@@ -845,6 +852,8 @@ static inline WSACMSGHDR *fill_control_message(int level, int type, WSACMSGHDR *
 }
 #endif /* defined(IP_PKTINFO) || defined(IP_RECVDSTADDR) */
 
+#include "wine/hostptraddrspace_enter.h"
+
 static inline int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 {
 #if defined(IP_PKTINFO) || defined(IP_RECVDSTADDR)
@@ -871,7 +880,7 @@ static inline int convert_control_headers(struct msghdr *hdr, WSABUF *control)
                         memcpy(&data_win.ipi_addr,&data_unix->ipi_addr.s_addr,4); /* 4 bytes = 32 address bits */
                         data_win.ipi_ifindex = data_unix->ipi_ifindex;
                         ptr = fill_control_message(WS_IPPROTO_IP, WS_IP_PKTINFO, ptr, &ctlsize,
-                                                   (void*)&data_win, sizeof(data_win));
+                                                   &data_win, sizeof(data_win));
                         if (!ptr) goto error;
                     }   break;
 #elif defined(IP_RECVDSTADDR)
@@ -909,6 +918,9 @@ error:
     return 1;
 #endif /* defined(IP_PKTINFO) || defined(IP_RECVDSTADDR) */
 }
+
+#include "wine/hostptraddrspace_exit.h"
+
 #endif /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
 /* ----------------------------------- error handling */
@@ -1359,7 +1371,7 @@ static void free_per_thread_data(void)
     HeapFree( GetProcessHeap(), 0, ptb->he_buffer );
     HeapFree( GetProcessHeap(), 0, ptb->se_buffer );
     HeapFree( GetProcessHeap(), 0, ptb->pe_buffer );
-    HeapFree( GetProcessHeap(), 0, ptb->fd_cache );
+    HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(void *, ptb->fd_cache) );
 
     HeapFree( GetProcessHeap(), 0, ptb );
     NtCurrentTeb()->WinSockData = NULL;
@@ -2671,7 +2683,7 @@ static int WS2_send( int fd, struct ws2_async *wsa, int flags )
         n -= wsa->iovec[wsa->first_iovec++].iov_len;
     if (wsa->first_iovec < wsa->n_iovecs)
     {
-        wsa->iovec[wsa->first_iovec].iov_base = (char*)wsa->iovec[wsa->first_iovec].iov_base + n;
+        wsa->iovec[wsa->first_iovec].iov_base = (char* HOSTPTR)wsa->iovec[wsa->first_iovec].iov_base + n;
         wsa->iovec[wsa->first_iovec].iov_len -= n;
     }
     return ret;
@@ -3493,6 +3505,59 @@ static int do_connect(int fd, const struct WS_sockaddr* name, int namelen)
     return wsaErrno();
 }
 
+static void try_OVR_map(const char *shm_name)
+{
+#ifdef HAVE_SHM_OPEN
+    int fd, ret;
+    HANDLE handle, map;
+    const char *winname = shm_name + 1;
+
+    fd = shm_open(shm_name, O_RDWR, S_IRUSR | S_IWUSR);
+    if(fd < 0){
+        TRACE_(oculus)("No %s shm object\n", shm_name);
+        return;
+    }
+
+    wine_server_send_fd(fd);
+
+    SERVER_START_REQ(alloc_file_handle)
+    {
+        req->access     = GENERIC_READ | GENERIC_WRITE;
+        req->attributes = FILE_ATTRIBUTE_NORMAL;
+        req->fd         = fd;
+        if (!(ret = wine_server_call( req )))
+            handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+
+    if(!ret){
+        map = CreateFileMappingA(handle, NULL, PAGE_READWRITE, 0, 0, winname);
+        if(!map){
+            WARN_(oculus)("Couldn't create mapping \"%s\", skipping\n", winname);
+            CloseHandle(handle);
+        }
+    }else
+        WARN_(oculus)("Couldn't allocate file handle\n");
+
+    TRACE_(oculus)("Created map for shm object %s\n", shm_name);
+
+    /* let the handles leak, as we want the mapping to exist until the
+     * session quits */
+#endif
+}
+
+static void setup_oculus(void)
+{
+    /* The hard-coded names below are not strictly correct. We should get the
+     * file paths from `ovrd` using the Oculus SDK. See NetClient::Hmd_Create,
+     * which gives us a HMDNetworkInfo which contains the filenames.
+     *
+     * In practice, there will only ever be one ovrd running and one Rift
+     * connected, so this is good enough. */
+    try_OVR_map("/OVR_cam_0_0");
+    try_OVR_map("/OVR_hmd_0_0");
+}
+
 /***********************************************************************
  *		connect		(WS2_32.4)
  */
@@ -3500,7 +3565,20 @@ int WINAPI WS_connect(SOCKET s, const struct WS_sockaddr* name, int namelen)
 {
     int fd = get_sock_fd( s, FILE_READ_DATA, NULL );
 
+    static const IN6_ADDR ipv6_localhost = IN6ADDR_LOOPBACK_INIT;
+
     TRACE("socket %04lx, ptr %p %s, length %d\n", s, name, debugstr_sockaddr(name), namelen);
+
+#define OCULUS_VR_PORT 30322
+    if (name->sa_family == WS_AF_INET6 &&
+            !memcmp(((struct WS_sockaddr_in6 *)name)->sin6_addr.WS_s6_addr, ipv6_localhost.WS_s6_addr, sizeof(ipv6_localhost.WS_s6_addr)) &&
+            ntohs(((struct WS_sockaddr_in6 *)name)->sin6_port) == OCULUS_VR_PORT){
+        if (getenv("CX_DISABLE_OCULUS") == NULL){
+            TRACE_(oculus)("Client is connecting to Oculus port, setting up SHM maps\n");
+            setup_oculus();
+        }else
+            TRACE_(oculus)("Oculus support disabled in environment\n");
+    }
 
     if (fd != -1)
     {
@@ -5248,7 +5326,7 @@ static struct pollfd *fd_sets_to_poll( const WS_fd_set *readfds, const WS_fd_set
             SetLastError( ERROR_NOT_ENOUGH_MEMORY );
             return NULL;
         }
-        HeapFree(GetProcessHeap(), 0, ptb->fd_cache);
+        HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(void *, ptb->fd_cache));
         ptb->fd_cache = fds;
         ptb->fd_count = count;
     }
@@ -5470,7 +5548,7 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
 int WINAPI WSAPoll(WSAPOLLFD *wfds, ULONG count, int timeout)
 {
     int i, ret;
-    struct pollfd *ufds;
+    struct pollfd * WIN32PTR ufds;
 
     if (!count)
     {
@@ -6284,9 +6362,9 @@ struct WS_hostent* WINAPI WS_gethostbyaddr(const char *addr, int len, int type)
  * Comparison function for qsort(), for sorting two routes (struct route)
  * by metric in ascending order.
  */
-static int WS_compare_routes_by_metric_asc(const void *left, const void *right)
+static int WS_compare_routes_by_metric_asc(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    const struct route *a = left, *b = right;
+    const struct route * HOSTPTR a = left, * HOSTPTR b = right;
     if (a->default_route && b->default_route)
         return a->default_route - b->default_route;
     if (a->default_route && !b->default_route)
@@ -6480,7 +6558,7 @@ struct WS_hostent* WINAPI WS_gethostbyname(const char* name)
 }
 
 
-static const struct { int prot; const char *names[3]; } protocols[] =
+static const struct { int prot; const char * HOSTPTR names[3]; } protocols[] =
 {
     {   0, { "ip", "IP" }},
     {   1, { "icmp", "ICMP" }},
@@ -6555,7 +6633,7 @@ struct WS_protoent* WINAPI WS_getprotobyname(const char* name)
         for (i = 0; i < ARRAY_SIZE(protocols); i++)
         {
             if (_strnicmp( protocols[i].names[0], name, -1 )) continue;
-            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+            retval = WS_create_pe( protocols[i].names[0], (char * HOSTPTR *)protocols[i].names + 1,
                                    protocols[i].prot );
             break;
         }
@@ -6589,7 +6667,7 @@ struct WS_protoent* WINAPI WS_getprotobynumber(int number)
         for (i = 0; i < ARRAY_SIZE(protocols); i++)
         {
             if (protocols[i].prot != number) continue;
-            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+            retval = WS_create_pe( protocols[i].names[0], (char * HOSTPTR *)protocols[i].names + 1,
                                    protocols[i].prot );
             break;
         }
@@ -7828,7 +7906,7 @@ INT WINAPI WSAUnhookBlockingHook(void)
  * pointers (via a template of some kind).
  */
 
-static int list_size(char** l, int item_size)
+static int list_size(char* HOSTPTR * HOSTPTR l, int item_size)
 {
   int i,j = 0;
   if(l)
@@ -7838,7 +7916,7 @@ static int list_size(char** l, int item_size)
   return j;
 }
 
-static int list_dup(char** l_src, char** l_to, int item_size)
+static int list_dup(char* HOSTPTR * HOSTPTR l_src, char** l_to, int item_size)
 {
    char *p;
    int i;
@@ -7869,7 +7947,7 @@ static int list_dup(char** l_src, char** l_to, int item_size)
  * the list has no items ("aliases" and "addresses" must be
  * at least "1", a truly empty list is invalid).
  */
-static struct WS_hostent *WS_create_he(char *name, int aliases, int aliases_size, int addresses, int address_length)
+static struct WS_hostent *WS_create_he(char * HOSTPTR name, int aliases, int aliases_size, int addresses, int address_length)
 {
     struct WS_hostent *p_to;
     char *p;
@@ -7945,7 +8023,7 @@ static struct WS_hostent *WS_dup_he(const struct hostent* p_he)
 
 /* ----- protoent */
 
-static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot )
+static struct WS_protoent *WS_create_pe( const char * HOSTPTR name, char * HOSTPTR * HOSTPTR aliases, int prot )
 {
     struct WS_protoent *ret;
     unsigned int size = sizeof(*ret) + strlen(name) + sizeof(char *) + list_size(aliases, 0);
@@ -8366,13 +8444,13 @@ PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, SIZE_T len )
     case WS_AF_INET:
     {
         in = addr;
-        pdst = inet_ntop( AF_INET, &in->WS_s_addr, buffer, len );
+        pdst = ADDRSPACECAST(PCSTR, inet_ntop( AF_INET, &in->WS_s_addr, buffer, len ));
         break;
     }
     case WS_AF_INET6:
     {
         in6 = addr;
-        pdst = inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len );
+        pdst = ADDRSPACECAST(PCSTR, inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len ));
         break;
     }
     default:

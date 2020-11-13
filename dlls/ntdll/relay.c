@@ -38,7 +38,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 struct relay_descr  /* descriptor for a module */
 {
@@ -328,7 +328,7 @@ static void trace_string_w( INT_PTR ptr )
     else TRACE( "%08lx", ptr );
 }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /***********************************************************************
  *           relay_trace_entry
@@ -405,6 +405,7 @@ DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigne
 }
 
 extern LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx );
+#ifdef __i386__
 __ASM_GLOBAL_FUNC( relay_call,
                    "pushl %ebp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -466,6 +467,69 @@ __ASM_GLOBAL_FUNC( relay_call,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret $8" )
+#else
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(relay_call),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl %esi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
+                     "pushl %edi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
+                     "pushl %ecx\n\t"
+                     __ASM_CFI(".cfi_rel_offset %ecx,-12\n\t")
+                     /* trace the parameters */
+                     "pushl %eax\n\t"
+                     "pushl %esp\n\t"  /* number of args return ptr */
+                     "leal 20(%ebp),%esi\n\t"  /* stack */
+                     "pushl %esi\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("relay_trace_entry") "\n\t"
+                     /* copy the arguments*/
+                     "movzwl -16(%ebp),%ecx\n\t"  /* number of args */
+                     "jecxz 1f\n\t"
+                     "leal 0(,%ecx,4),%edx\n\t"
+                     "subl %edx,%esp\n\t"
+                     "andl $~15,%esp\n\t"
+                     "movl %esp,%edi\n\t"
+                     "cld\n\t"
+                     "rep; movsl\n\t"
+                     "testl $0x80000000,-16(%ebp)\n\t"  /* thiscall */
+                     "jz 1f\n\t"
+                     "popl %ecx\n\t"
+                     "testl $0x40000000,-16(%ebp)\n\t"  /* fastcall */
+                     "jz 1f\n\t"
+                     "popl %edx\n"
+                     /* call the entry point */
+                     "1:\tcall *%eax\n\t"
+                     "movl %eax,%esi\n\t"
+                     "movl %edx,%edi\n\t"
+                     /* trace the return value */
+                     "leal -20(%ebp),%esp\n\t"
+                     "pushl %edx\n\t"
+                     "pushl %eax\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("relay_trace_exit") "\n\t"
+                     /* restore return value and return */
+                     "leal -12(%ebp),%esp\n\t"
+                     "movl %esi,%eax\n\t"
+                     "movl %edi,%edx\n\t"
+                     "popl %ecx\n\t"
+                     __ASM_CFI(".cfi_same_value %ecx\n\t")
+                     "popl %edi\n\t"
+                     __ASM_CFI(".cfi_same_value %edi\n\t")
+                     "popl %esi\n\t"
+                     __ASM_CFI(".cfi_same_value %esi\n\t")
+                     "popl %ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret $8" )
+#endif /* __i386__ */
 
 #elif defined(__arm__)
 
@@ -1368,6 +1432,12 @@ void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Return( void **stack )
 
 SNOOP_WRAPPER( SNOOP_Entry )
 SNOOP_WRAPPER( SNOOP_Return )
+
+// #elif defined(__i386_on_x86_64__)
+//
+// #error "Implement this for x86_32on64?"
+// // It seems optional, but if it's relatively easy it'd be nice to have.
+// // If it's hard, just remove this #elif branch.
 
 #else  /* __i386__ */
 

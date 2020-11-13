@@ -138,6 +138,26 @@ static void texture2d_depth_blt_fbo(const struct wined3d_device *device, struct 
     checkGLcall("glBlitFramebuffer()");
 }
 
+static void prepare_blit_quirks(const struct wined3d_device *device, const struct wined3d_gl_info *gl_info)
+{
+    /* ATI Macs blend blits even though GL_EXT_framebuffer_blit says that this
+     * operation does not blend. This sometimes even happens if GL_BLEND is
+     * disabled, although in my glut test case blending has to be enabled for
+     * the bug to occur. While we're at it, disable blending.
+     *
+     * Tracked by crossover hacks bug 5391. */
+    gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
+    gl_info->gl_ops.gl.p_glBlendFunc(GL_ONE, GL_ZERO);
+    device_invalidate_state(device, STATE_RENDER(WINED3D_RS_ALPHABLENDENABLE));
+
+    gl_info->gl_ops.gl.p_glDisable(GL_ALPHA_TEST);
+    gl_info->gl_ops.gl.p_glAlphaFunc(GL_ALWAYS, 0.0);
+    device_invalidate_state(device, STATE_RENDER(WINED3D_RS_ALPHATESTENABLE));
+    gl_info->gl_ops.gl.p_glDisable(GL_STENCIL_TEST);
+    gl_info->gl_ops.gl.p_glStencilFunc(GL_ALWAYS, 0, 0);
+    device_invalidate_state(device, STATE_RENDER(WINED3D_RS_STENCILENABLE));
+}
+
 /* Blit between surface locations. Onscreen on different swapchains is not supported.
  * Depth / stencil is not supported. Context activation is done by the caller. */
 void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_context *context,
@@ -268,6 +288,9 @@ void texture2d_blt_fbo(struct wined3d_device *device, struct wined3d_context *co
 
     gl_info->gl_ops.gl.p_glDisable(GL_SCISSOR_TEST);
     context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SCISSORTESTENABLE));
+
+    if (gl_info->quirks & WINED3D_CX_QUIRK_BLIT)
+        prepare_blit_quirks(device, gl_info);
 
     gl_info->fbo_ops.glBlitFramebuffer(src_rect->left, src_rect->top, src_rect->right, src_rect->bottom,
             dst_rect->left, dst_rect->top, dst_rect->right, dst_rect->bottom, GL_COLOR_BUFFER_BIT, gl_filter);
@@ -789,7 +812,7 @@ void texture2d_read_from_framebuffer(struct wined3d_texture *texture, unsigned i
 
         if (data.buffer_object)
         {
-            mem = GL_EXTCALL(glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_WRITE));
+            mem = ADDRSPACECAST(void*, GL_EXTCALL(glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_WRITE)));
             checkGLcall("glMapBuffer");
         }
         else

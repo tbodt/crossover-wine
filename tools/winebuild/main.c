@@ -50,6 +50,8 @@ int unix_lib = 0;
 
 #ifdef __i386__
 enum target_cpu target_cpu = CPU_x86;
+#elif defined(__i386_on_x86_64__)
+enum target_cpu target_cpu = CPU_x86_32on64;
 #elif defined(__x86_64__)
 enum target_cpu target_cpu = CPU_x86_64;
 #elif defined(__powerpc__)
@@ -279,6 +281,7 @@ static const char usage_str[] =
 "   -l, --library=LIB         Import the specified library\n"
 "   -L, --library-path=DIR    Look for imports libraries in DIR\n"
 "   -m16, -m32, -m64          Force building 16-bit, 32-bit resp. 64-bit code\n"
+"   -mwine32                  Force building 32-bit-on-64-bit hybrid code\n"
 "   -M, --main-module=MODULE  Set the name of the main module for a Win16 dll\n"
 "       --nm-cmd=NM           Command to use to get undefined symbols (default: nm)\n"
 "       --nxcompat=y|n        Set the NX compatibility flag (default: yes)\n"
@@ -428,6 +431,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             if (!strcmp( optarg, "16" )) spec->type = SPEC_WIN16;
             else if (!strcmp( optarg, "32" )) force_pointer_size = 4;
             else if (!strcmp( optarg, "64" )) force_pointer_size = 8;
+            else if (!strcmp( optarg, "wine32" )) { force_pointer_size = 8; target_cpu = CPU_x86_32on64; }
             else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
             else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
             else if (!strcmp( optarg, "unix" )) unix_lib = 1;
@@ -557,6 +561,8 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
         break;
     case CPU_x86_64:
         if (force_pointer_size == 4) target_cpu = CPU_x86;
+        break;
+    case CPU_x86_32on64:
         break;
     default:
         if (force_pointer_size == 8)

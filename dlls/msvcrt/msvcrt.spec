@@ -1518,3 +1518,7 @@
 @ varargs wprintf_s(wstr) MSVCRT_wprintf_s
 @ varargs wscanf(wstr) MSVCRT_wscanf
 @ varargs wscanf_s(wstr) MSVCRT_wscanf_s
+
+@ cdecl -arch=x86_32on64 wine_strlen_HOSTPTR(int64) MSVCRT_strlen_HOSTPTR
+@ cdecl -arch=x86_32on64 -ret64 wine_memcpy_HOSTPTR(int64 int64 long) MSVCRT_memcpy_HOSTPTR
+@ cdecl -arch=x86_32on64 -norelay wine__vsnprintf_HOSTPTR(int64 long int64 ptr) MSVCRT_vsnprintf_HOSTPTR

@@ -24,11 +24,14 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h" /* CrossOver Hack 10798 */
 
 #include "wine/wgl.h"
 #include "wine/glu.h"
 #include "wine/library.h"
 #include "wine/debug.h"
+/* CrossOver Hack 10798 */
+#include "wine/wgl_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(glu);
 
@@ -92,25 +95,34 @@ static const struct { GLuint err; const char *str; } errors[] =
     { GLU_NURBS_ERROR37, "duplicate point on piecewise linear trimming curve" },
 };
 
+#include "wine/hostptraddrspace_enter.h"
+
 typedef void (*_GLUfuncptr)(void);
 
-static void  (*p_gluBeginCurve)( GLUnurbs* nurb );
-static void  (*p_gluBeginSurface)( GLUnurbs* nurb );
-static void  (*p_gluBeginTrim)( GLUnurbs* nurb );
-static void  (*p_gluDeleteNurbsRenderer)( GLUnurbs* nurb );
-static void  (*p_gluEndCurve)( GLUnurbs* nurb );
-static void  (*p_gluEndSurface)( GLUnurbs* nurb );
-static void  (*p_gluEndTrim)( GLUnurbs* nurb );
-static void  (*p_gluGetNurbsProperty)( GLUnurbs* nurb, GLenum property, GLfloat* data );
-static void  (*p_gluLoadSamplingMatrices)( GLUnurbs* nurb, const GLfloat *model, const GLfloat *perspective, const GLint *view );
-static GLUnurbs* (*p_gluNewNurbsRenderer)(void);
-static void  (*p_gluNurbsCallback)( GLUnurbs* nurb, GLenum which, _GLUfuncptr CallBackFunc );
-static void  (*p_gluNurbsCurve)( GLUnurbs* nurb, GLint knotCount, GLfloat *knots, GLint stride, GLfloat *control, GLint order, GLenum type );
-static void  (*p_gluNurbsProperty)( GLUnurbs* nurb, GLenum property, GLfloat value );
-static void  (*p_gluNurbsSurface)( GLUnurbs* nurb, GLint sKnotCount, GLfloat* sKnots, GLint tKnotCount, GLfloat* tKnots, GLint sStride, GLint tStride, GLfloat* control, GLint sOrder, GLint tOrder, GLenum type );
-static void  (*p_gluPwlCurve)( GLUnurbs* nurb, GLint count, GLfloat* data, GLint stride, GLenum type );
+#define MAKEFUNC(f) \
+    static typeof(((struct opengl_funcs*)0)->glu.p_##f) p_##f;
 
-static void *libglu_handle;
+MAKEFUNC(gluBeginCurve)
+MAKEFUNC(gluBeginSurface)
+MAKEFUNC(gluBeginTrim)
+MAKEFUNC(gluDeleteNurbsRenderer)
+MAKEFUNC(gluEndCurve)
+MAKEFUNC(gluEndSurface)
+MAKEFUNC(gluEndTrim)
+MAKEFUNC(gluGetNurbsProperty)
+MAKEFUNC(gluLoadSamplingMatrices)
+MAKEFUNC(gluNewNurbsRenderer)
+MAKEFUNC(gluNurbsCallback)
+MAKEFUNC(gluNurbsCurve)
+MAKEFUNC(gluNurbsProperty)
+MAKEFUNC(gluNurbsSurface)
+MAKEFUNC(gluPwlCurve)
+
+#include "wine/hostptraddrspace_exit.h"
+
+/* CrossOver Hack 10798 */
+#if 0
+static void * HOSTPTR libglu_handle;
 static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
 
 static BOOL WINAPI load_libglu( INIT_ONCE *once, void *param, void **context )
@@ -128,16 +140,32 @@ static BOOL WINAPI load_libglu( INIT_ONCE *once, void *param, void **context )
     return libglu_handle != NULL;
 }
 
-static void *load_glufunc( const char *name )
+static void * HOSTPTR load_glufunc( const char *name )
 {
-    void *ret;
+    void * HOSTPTR ret;
 
     if (!InitOnceExecuteOnce( &init_once, load_libglu, NULL, NULL )) return NULL;
     if (!(ret = wine_dlsym( libglu_handle, name, NULL, 0 ))) ERR( "Can't find %s\n", name );
     return ret;
 }
+#else
+static struct opengl_funcs* get_opengl_funcs(void)
+{
+    static struct opengl_funcs *funcs;
 
-#define LOAD_FUNCPTR(f) (p_##f || (p_##f = load_glufunc( #f )))
+    if (!funcs)
+    {
+        static const WCHAR displayW[] = {'D','I','S','P','L','A','Y',0};
+        HDC hdc = CreateDCW(displayW, NULL, NULL, NULL);
+        funcs = __wine_get_wgl_driver(hdc, WINE_WGL_DRIVER_VERSION);
+        DeleteDC(hdc);
+    }
+
+    return funcs;
+}
+#endif
+
+#define LOAD_FUNCPTR(f) (p_##f || (p_##f = get_opengl_funcs()->glu.p_##f))
 
 
 /***********************************************************************
@@ -177,7 +205,7 @@ const WCHAR * WINAPI wine_gluErrorUnicodeStringEXT( GLenum errCode )
 GLUnurbs * WINAPI wine_gluNewNurbsRenderer(void)
 {
     if (!LOAD_FUNCPTR( gluNewNurbsRenderer )) return NULL;
-    return p_gluNewNurbsRenderer();
+    return ADDRSPACECAST(GLUnurbs*, p_gluNewNurbsRenderer()); /* FIXME */
 }
 
 /***********************************************************************
@@ -308,6 +336,7 @@ void WINAPI wine_gluPwlCurve( GLUnurbs *nobj, GLint count, GLfloat *array, GLint
 void WINAPI wine_gluNurbsCallback( GLUnurbs *nobj, GLenum which, void (CALLBACK *fn)(void) )
 {
     if (!LOAD_FUNCPTR( gluNurbsCallback )) return;
+    ERR("not translating callback convention, which=%i, expect a crash\n", which);
     /* FIXME: callback calling convention */
     p_gluNurbsCallback( nobj, which, (_GLUfuncptr)fn );
 }

@@ -131,6 +131,11 @@ static FT_Version_t FT_Version;
 static DWORD FT_SimpleVersion;
 #define FT_VERSION_VALUE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#pragma clang storage_addr_space(push, default)
+#endif
+
 static void *ft_handle = NULL;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
@@ -195,6 +200,11 @@ MAKE_FUNCPTR(FcPatternGetString);
 
 #undef MAKE_FUNCPTR
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#pragma clang storage_addr_space(pop)
+#endif
+
 #ifndef FT_MAKE_TAG
 #define FT_MAKE_TAG( ch0, ch1, ch2, ch3 ) \
 	( ((DWORD)(BYTE)(ch0) << 24) | ((DWORD)(BYTE)(ch1) << 16) | \
@@ -252,6 +262,9 @@ typedef struct {
     FT_Short internal_leading;
 } Bitmap_Size;
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#endif
 /* FT_Bitmap_Size gained 3 new elements between FreeType 2.1.4 and 2.1.5
    So to let this compile on older versions of FreeType we'll define the
    new structure here. */
@@ -259,6 +272,10 @@ typedef struct {
     FT_Short height, width;
     FT_Pos size, x_ppem, y_ppem;
 } My_FT_Bitmap_Size;
+
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#endif
 
 struct enum_data
 {
@@ -595,7 +612,7 @@ struct font_mapping
     int         refcount;
     dev_t       dev;
     ino_t       ino;
-    void       *data;
+    void* HOSTPTR data;
     size_t      size;
 };
 
@@ -829,6 +846,10 @@ static char **expand_mac_font(const char *path)
         unsigned int size, max_size;
     } ret;
 
+    /* CrossOver HACK #15526.  High Sierra can block when using the FSRef api, so ignore
+       suitcase fonts. */
+    return NULL;
+
     TRACE("path %s\n", path);
 
     s = FSPathMakeRef((unsigned char*)path, &ref, FALSE);
@@ -873,8 +894,8 @@ static char **expand_mac_font(const char *path)
     while(1)
     {
         FamRec *fam_rec;
-        unsigned short *num_faces_ptr, num_faces, face;
-        AsscEntry *assoc;
+        unsigned short * HOSTPTR num_faces_ptr, num_faces, face;
+        AsscEntry * HOSTPTR assoc;
         Handle fond;
         ResType fond_res = FT_MAKE_TAG('F','O','N','D');
 
@@ -883,11 +904,11 @@ static char **expand_mac_font(const char *path)
         TRACE("got fond resource %d\n", idx);
         HLock(fond);
 
-        fam_rec = *(FamRec**)fond;
-        num_faces_ptr = (unsigned short *)(fam_rec + 1);
+        fam_rec = *(FamRec** HOSTPTR)fond;
+        num_faces_ptr = (unsigned short * HOSTPTR)(fam_rec + 1);
         num_faces = GET_BE_WORD(*num_faces_ptr);
         num_faces++;
-        assoc = (AsscEntry*)(num_faces_ptr + 1);
+        assoc = (AsscEntry * HOSTPTR)(num_faces_ptr + 1);
         TRACE("num faces %04x\n", num_faces);
         for(face = 0; face < num_faces; face++, assoc++)
         {
@@ -924,11 +945,8 @@ static char **expand_mac_font(const char *path)
                 {
                     if(fd != -1)
                     {
-                        unsigned char *sfnt_data;
-
                         HLock(sfnt);
-                        sfnt_data = *(unsigned char**)sfnt;
-                        write(fd, sfnt_data, GetHandleSize(sfnt));
+                        write(fd, *sfnt, GetHandleSize(sfnt));
                         HUnlock(sfnt);
                         close(fd);
                     }
@@ -1164,7 +1182,7 @@ static BOOL add_font_subst(struct list *subst_list, FontSubst *subst, INT flags)
     return FALSE;
 }
 
-static WCHAR *towstr(UINT cp, const char *str)
+static WCHAR *towstr(UINT cp, const char * HOSTPTR str)
 {
     int len;
     WCHAR *wstr;
@@ -1439,9 +1457,9 @@ static WCHAR *copy_name_table_string( const FT_SfntName *name )
         return ret;
     case TT_PLATFORM_MACINTOSH:
         codepage = get_mac_code_page( name );
-        i = MultiByteToWideChar( codepage, 0, (char *)name->string, name->string_len, NULL, 0 );
+        i = MultiByteToWideChar( codepage, 0, (char * HOSTPTR)name->string, name->string_len, NULL, 0 );
         ret = HeapAlloc( GetProcessHeap(), 0, (i + 1) * sizeof(WCHAR) );
-        MultiByteToWideChar( codepage, 0, (char *)name->string, name->string_len, ret, i );
+        MultiByteToWideChar( codepage, 0, (char * HOSTPTR)name->string, name->string_len, ret, i );
         ret[i] = 0;
         return ret;
     }
@@ -2284,6 +2302,28 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
             return 0;
         }
 
+        /* CROSSOVER HACK - bug 4862 */
+        if(!strcmp(ft_face->family_name, "AR PL ZenKai Uni") || !strcmp(ft_face->family_name, "Samyak Oriya"))
+        {
+            /* These fonts (ukai.ttf, samyak-oriya.ttf) cause native gdiplus to crash */
+            TRACE("Skipping %s\n", ft_face->family_name);
+            pFT_Done_Face(ft_face);
+            return 0;
+        }
+
+        /* Ignore Apple's Symbol font */
+        if(!strcasecmp( ft_face->family_name, "symbol" ) && FT_IS_SFNT( ft_face ))
+        {
+            FONTSIGNATURE fs;
+            get_fontsig( ft_face, &fs );
+            if(!(fs.fsCsb[0] & 0x80000000))
+            {
+                TRACE( "Skipping Apple's Symbol font\n" );
+                pFT_Done_Face( ft_face );
+                return 0;
+            }
+        }
+
         AddFaceToList(ft_face, file, font_data_ptr, font_data_size, face_index, flags);
         ++ret;
 
@@ -2384,6 +2424,64 @@ static void LoadReplaceList(void)
     LPWSTR value;
     LPVOID data;
 
+/* CROSSOVER HACK - bug 13095 and 13610 */
+    static const WCHAR atSimSun[] = {'@','S','i','m','S','u','n',0};
+    static const WCHAR NSimSun[] = {'N','S','i','m','S','u','n',0};
+    static const WCHAR atNSimSun[] = {'@','N','S','i','m','S','u','n',0};
+    static const WCHAR SongTi[] = {0x5b8b,0x4f53,0};
+    static const WCHAR atSongTi[] = {'@',0x5b8b,0x4f53,0};
+    static const WCHAR XinSongTi[] = {0x65B0,0x5b8b,0x4f53,0};
+    static const WCHAR atXinSongTi[] = {'@',0x65B0,0x5b8b,0x4f53,0};
+    static const WCHAR *cn_font_replacement[] = {
+        SimSun,
+        NSimSun,
+        SongTi,
+        XinSongTi,
+        atSimSun,
+        atNSimSun,
+        atSongTi,
+        atXinSongTi
+    };
+    int replacement_count = sizeof(cn_font_replacement)/sizeof(cn_font_replacement[0]);
+    BOOL *cn_font_seen = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, replacement_count * sizeof(BOOL));
+#ifdef __APPLE__
+    static const WCHAR STSong[] = {'S','T','S','o','n','g',0};
+    static const WCHAR atSTSong[] = {'@','S','T','S','o','n','g',0};
+    static const WCHAR new_cn_font[] = {
+        'H','i','r','a','g','i','n','o',' ','S','a','n','s',' ','G','B',' ','W','3',0,
+        'S','T','S','o','n','g',0,
+        0
+    };
+    static const WCHAR vertical_new_cn_font[] = {
+        '@','H','i','r','a','g','i','n','o',' ','S','a','n','s',' ','G','B',' ','W','3',0,
+        '@','S','T','S','o','n','g',0,
+        0
+    };
+#else
+    static const WCHAR new_cn_font[] = {
+        /* Noto Sans CJK SC Regular - default Simplified Chinese font for Ubuntu 16.04 or later */
+        'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
+        /* Source Han Sans CN - Fedora's default Simplified Chinese font */
+        'S','o','u','r','c','e',' ','H','a','n',' ','S','a','n','s',' ','C','N',' ','R','e','g','u','l','a','r',0,
+        /* WenQuanYi Micro Hei - popular open source Simplified Chinese font */
+        'W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+        /* Droid Sans Fallback - Ubuntu's default Simplified Chinese font */
+        'D','r','o','i','d',' ','S','a','n','s',' ','F','a','l','l','b','a','c','k',0,
+        0
+    };
+    static const WCHAR vertical_new_cn_font[] = {
+        /* Noto Sans CJK SC Regular - default Simplified Chinese font for Ubuntu 16.04 or later */
+        '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
+        /* Source Han Sans CN - Fedora's default Simplified Chinese font */
+        '@','S','o','u','r','c','e',' ','H','a','n',' ','S','a','n','s',' ','C','N',' ','R','e','g','u','l','a','r',0,
+        /* WenQuanYi Micro Hei - popular open source Simplified Chinese font */
+        '@','W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+        /* Droid Sans Fallback - Ubuntu's default Simplified Chinese font */
+        '@','D','r','o','i','d',' ','S','a','n','s',' ','F','a','l','l','b','a','c','k',0,
+        0
+    };
+#endif
+
     /* @@ Wine registry key: HKCU\Software\Wine\Fonts\Replacements */
     if(RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts\\Replacements", &hkey) == ERROR_SUCCESS)
     {
@@ -2401,9 +2499,31 @@ static void LoadReplaceList(void)
             /* "NewName"="Oldname" */
             if(!find_family_from_any_name(value))
             {
+                const WCHAR *replace = data;
+
+/* CROSSOVER HACK - bug 13095 and 13610 */
+                int j;
+                for (j = 0; j < replacement_count; j++)
+                {
+                    if (!cn_font_seen[j] && !lstrcmpW(value, cn_font_replacement[j]))
+                    {
+#ifdef __APPLE__
+                        BOOL is_vertical = value[0] == '@';
+                        if (type == REG_SZ && !lstrcmpW(data, is_vertical ? atSTSong : STSong))
+                        {
+                            if (is_vertical)
+                                replace = vertical_new_cn_font;
+                            else
+                                replace = new_cn_font;
+                            type = REG_MULTI_SZ;
+                        }
+#endif
+                        cn_font_seen[j] = TRUE;
+                        break;
+                    }
+                }
                 if (type == REG_MULTI_SZ)
                 {
-                    WCHAR *replace = data;
                     while(*replace)
                     {
                         if (map_font_family(value, replace))
@@ -2421,10 +2541,29 @@ static void LoadReplaceList(void)
 	    dlen = datalen;
 	    vlen = valuelen;
 	}
+/* CROSSOVER HACK - bug 13095 and 13610 */
+        for (i = 0; i < replacement_count; i++)
+        {
+            if (!cn_font_seen[i] && !find_family_from_any_name(cn_font_replacement[i]))
+            {
+                const WCHAR *replace;
+                if (cn_font_replacement[i][0] == '@')
+                    replace = vertical_new_cn_font;
+                else
+                    replace = new_cn_font;
+                while (*replace)
+                {
+                    if (map_font_family(cn_font_replacement[i], replace))
+                        break;
+                    replace += strlenW(replace) + 1;
+                }
+            }
+        }
 	HeapFree(GetProcessHeap(), 0, data);
 	HeapFree(GetProcessHeap(), 0, value);
 	RegCloseKey(hkey);
     }
+    HeapFree(GetProcessHeap(), 0, cn_font_seen);
 }
 
 static const WCHAR *font_links_list[] =
@@ -2787,7 +2926,7 @@ static UINT parse_aa_pattern( FcPattern *pattern )
 
 static void init_fontconfig(void)
 {
-    void *fc_handle = wine_dlopen(SONAME_LIBFONTCONFIG, RTLD_NOW, NULL, 0);
+    void * HOSTPTR fc_handle = wine_dlopen(SONAME_LIBFONTCONFIG, RTLD_NOW, NULL, 0);
 
     if (!fc_handle)
     {
@@ -2837,8 +2976,12 @@ static void load_fontconfig_fonts(void)
     int i, len;
     char *file;
     const char *ext;
+    static const WCHAR cx_hack_var[] = {'C','X','_','S','K','I','P','_','F','O','N','T','C','O','N','F','I','G','_',
+                                        'F','O','N','T','S',0};
+    WCHAR env_buf[20];
 
     if (!fontconfig_enabled) return;
+    if(GetEnvironmentVariableW(cx_hack_var, env_buf, sizeof(env_buf)/sizeof(WCHAR))) return;
 
     pat = pFcPatternCreate();
     if (!pat) return;
@@ -2885,11 +3028,15 @@ static void load_fontconfig_fonts(void)
 
 #elif defined(HAVE_CARBON_CARBON_H)
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#endif
+
 static void load_mac_font_callback(const void *value, void *context)
 {
     CFStringRef pathStr = value;
     CFIndex len;
-    char* path;
+    char* WIN32PTR path;
 
     len = CFStringGetMaximumSizeOfFileSystemRepresentation(pathStr);
     path = HeapAlloc(GetProcessHeap(), 0, len);
@@ -3005,11 +3152,15 @@ static void load_mac_fonts(void)
     CFRelease(paths);
 }
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#endif
+
 #endif
 
 static char *get_font_dir(void)
 {
-    const char *build_dir, *data_dir;
+    const char * HOSTPTR build_dir, * HOSTPTR data_dir;
     char *name = NULL;
 
     if ((data_dir = wine_get_data_dir()))
@@ -3365,7 +3516,7 @@ HANDLE WineEngAddFontMemResourceEx(PVOID pbFont, DWORD cbFont, PVOID pdv, DWORD 
         /* FIXME: is the handle only for use in RemoveFontMemResourceEx or should it be a true handle?
          * For now return something unique but quite random
          */
-        TRACE("Returning handle %lx\n", ((INT_PTR)pFontCopy)^0x87654321);
+        TRACE("Returning handle %lx\n", ((size_t)pFontCopy)^0x87654321);
         return (HANDLE)(((INT_PTR)pFontCopy)^0x87654321);
     }
 
@@ -4151,7 +4302,16 @@ static void update_font_info(void)
 
 static BOOL init_freetype(void)
 {
-    ft_handle = wine_dlopen(SONAME_LIBFREETYPE, RTLD_NOW, NULL, 0);
+    const char *ftname = "libcxfreetype.so";
+
+    TRACE("Trying freetype library %s (hard-coded)\n",ftname);
+    ft_handle = wine_dlopen(ftname, RTLD_NOW, NULL, 0);
+
+    if(!ft_handle) {
+        TRACE("Can't find freetype library %s, trying %s instead\n", ftname, SONAME_LIBFREETYPE);
+        ft_handle = wine_dlopen(SONAME_LIBFREETYPE, RTLD_NOW, NULL, 0);
+    }
+
     if(!ft_handle) {
         WINE_MESSAGE(
       "Wine cannot find the FreeType font library.  To enable Wine to\n"
@@ -4236,6 +4396,9 @@ sym_not_found:
 
 static void init_font_list(void)
 {
+#if defined(__ANDROID__)
+    static const WCHAR fontswinedirW[] = {'c',':','\\','f','o','n','t','s','\\','w','i','n','e',0};
+#endif
     static const WCHAR dot_fonW[] = {'.','f','o','n','\0'};
     static const WCHAR pathW[] = {'P','a','t','h',0};
     HKEY hkey;
@@ -4258,7 +4421,11 @@ static void init_font_list(void)
     }
 
     /* load the wine fonts */
+#if defined(__ANDROID__)
+    if ((unixname = wine_get_unix_file_name(fontswinedirW)))
+#else
     if ((unixname = get_font_dir()))
+#endif
     {
         ReadFontDir(unixname, TRUE);
         HeapFree(GetProcessHeap(), 0, unixname);
@@ -4324,7 +4491,15 @@ static void init_font_list(void)
 #elif defined(HAVE_CARBON_CARBON_H)
     load_mac_fonts();
 #elif defined(__ANDROID__)
-    ReadFontDir("/system/fonts", TRUE);
+    {
+        static const WCHAR fontssystemdirW[] = {'c',':','\\','f','o','n','t','s','\\','s','y','s','t','e','m',0};
+        char *unixname = wine_get_unix_file_name(fontssystemdirW);
+        if (unixname)
+        {
+            ReadFontDir(unixname, TRUE);
+            HeapFree(GetProcessHeap(), 0, unixname);
+        }
+    }
 #endif
 
     /* then look in any directories that we've specified in the config file */
@@ -4348,7 +4523,7 @@ static void init_font_list(void)
                 ptr = valueA;
                 while (ptr)
                 {
-                    const char* home;
+                    const char* HOSTPTR home;
                     LPSTR next = strchr( ptr, ':' );
                     if (next) *next++ = 0;
                     if (ptr[0] == '~' && ptr[1] == '/' && (home = getenv( "HOME" )) &&
@@ -4413,6 +4588,9 @@ static void reorder_font_list(void)
  */
 BOOL WineEngInit(void)
 {
+    static const WCHAR cx_hack_var[] = {'C','X','_','T','U','R','N','_','O','F','F','_','F','O','N','T','_',
+                                        'R','E','P','L','A','C','E','M','E','N','T','S',0};
+    WCHAR env_buf[20];
     HKEY hkey;
     DWORD disposition;
     HANDLE font_mutex;
@@ -4462,7 +4640,9 @@ BOOL WineEngInit(void)
     DumpFontList();
     LoadSubstList();
     DumpSubstList();
-    LoadReplaceList();
+
+    if(!GetEnvironmentVariableW(cx_hack_var, env_buf, sizeof(env_buf)/sizeof(WCHAR)))
+        LoadReplaceList();
 
     if(disposition == REG_CREATED_NEW_KEY)
         update_reg_entries();
@@ -4555,7 +4735,7 @@ static struct font_mapping *map_font_file( const char *name )
     mapping->data = mmap( NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
     close( fd );
 
-    if (mapping->data == MAP_FAILED)
+    if (mapping->data == MAP_FAILED_HOSTPTR)
     {
         HeapFree( GetProcessHeap(), 0, mapping );
         return NULL;
@@ -4588,7 +4768,7 @@ static FT_Face OpenFontFace(GdiFont *font, Face *face, LONG width, LONG height)
 {
     FT_Error err;
     FT_Face ft_face;
-    void *data_ptr;
+    void * HOSTPTR data_ptr;
     DWORD data_size;
 
     TRACE("%s/%p, %ld, %d x %d\n", debugstr_w(face->file), face->font_data_ptr, face->face_index, width, height);
@@ -5345,7 +5525,7 @@ static Family* get_fontconfig_family(DWORD pitch_and_family, const CHARSETINFO *
         const SYSTEM_LINKS *font_link;
         const struct list *face_list;
 
-        ret = MultiByteToWideChar(CP_UTF8, 0, (const char*)str, -1,
+        ret = MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)str, -1,
                                   nameW, ARRAY_SIZE(nameW));
         if (!ret) continue;
         family = find_family_from_any_name(nameW);
@@ -7045,7 +7225,7 @@ static DWORD get_mono_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox,
     DWORD pitch  = ((width + 31) >> 5) << 2;
     DWORD needed = pitch * height;
     FT_Bitmap ft_bitmap;
-    BYTE *src, *dst;
+    BYTE * HOSTPTR src, *dst;
     INT w, h, x;
 
     if (!buf || !buflen) return needed;
@@ -7112,7 +7292,7 @@ static DWORD get_antialias_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox, UINT 
     DWORD needed = pitch * height;
     FT_Bitmap ft_bitmap;
     INT w, h, x, max_level;
-    BYTE *src, *dst;
+    BYTE * HOSTPTR src, *dst;
 
     if (!buf || !buflen) return needed;
     if (!needed) return GDI_ERROR;  /* empty glyph */
@@ -7187,7 +7367,7 @@ static DWORD get_subpixel_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox, UINT f
     DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
     DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
     DWORD pitch, needed = 0;
-    BYTE *src, *dst;
+    BYTE * HOSTPTR src, *dst;
     INT  w, h, x;
 
     switch (glyph->format)
@@ -7680,6 +7860,37 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     case GGO_GRAY4_BITMAP:
     case GGO_GRAY8_BITMAP:
     case WINE_GGO_GRAY16_BITMAP:
+
+        /****************** CodeWeavers hack to fix HL2 crash **************************
+         *
+         * Both glyphs 0x2e and 0x39 of this font get rendered to a larger
+         * size with FreeType than under Windows, and HL2 uses a fixed size
+         * buffer on the stack to copy the data into.  For now we'll clip glyphs
+         * from that font into a rather smaller BBox
+         *
+         ******************************************************************************/
+        if(!strcmp(ft_face->family_name, "HL2MP") ||
+           !strcmp(ft_face->family_name, "csd"))
+        {
+            int i;
+            DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
+            DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
+
+            if(width) width--;
+
+            for(i = 0; i < 2; i++)
+            {
+                if(height)
+                {
+                    height--;
+                    lpgm->gmptGlyphOrigin.y--;
+                }
+            }
+            gm.gmBlackBoxX = width  ? width  : 1;
+            gm.gmBlackBoxY = height ? height : 1;
+        }
+        /*********************************** End CW's hack ****************************/
+
         needed = get_antialias_glyph_bitmap( ft_face->glyph, bbox, format, font->fake_bold,
                                              needsTransform, matrices, buflen, buf );
 	break;
@@ -8237,16 +8448,16 @@ static BOOL get_outline_text_metrics(GdiFont *font)
 
     /* otmp* members should clearly have type ptrdiff_t, but M$ knows best */
     cp = (char*)font->potm + sizeof(*font->potm);
-    font->potm->otmpFamilyName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpFamilyName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, family_nameW);
     cp += lenfam;
-    font->potm->otmpStyleName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpStyleName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, style_nameW);
     cp += lensty;
-    font->potm->otmpFaceName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpFaceName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, face_nameW);
-	cp += lenface;
-    font->potm->otmpFullName = (LPSTR)(cp - (char*)font->potm);
+    cp += lenface;
+    font->potm->otmpFullName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, full_nameW);
     ret = TRUE;
 

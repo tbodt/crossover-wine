@@ -2987,7 +2987,7 @@ static void pev_dump_stack(struct pevaluator* pev)
 /* get the value out of an operand (variable or literal) */
 static BOOL  pev_get_val(struct pevaluator* pev, const char* str, DWORD_PTR* val)
 {
-    char*                       n;
+    char* HOSTPTR               n;
     struct hash_table_iter      hti;
     void*                       ptr;
 

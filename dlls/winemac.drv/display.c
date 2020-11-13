@@ -576,7 +576,7 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
             CFSTR("pixel_encoding"),
             CFSTR("refresh_rate"),
         };
-        const void* values[ARRAY_SIZE(keys)] = {
+        const void* HOSTPTR values[ARRAY_SIZE(keys)] = {
             cf_io_flags,
             cf_width,
             cf_height,
@@ -584,7 +584,7 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
             cf_refresh,
         };
 
-        ret = CFDictionaryCreate(NULL, (const void**)keys, (const void**)values, ARRAY_SIZE(keys),
+        ret = CFDictionaryCreate(NULL, (const void* HOSTPTR * HOSTPTR)keys, (const void* HOSTPTR * HOSTPTR)values, ARRAY_SIZE(keys),
                                  &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     }
 
@@ -622,10 +622,10 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
         struct display_mode_descriptor* desc;
         CFMutableDictionaryRef modes_by_size;
         CFIndex i, count;
-        CGDisplayModeRef* mode_array;
+        CGDisplayModeRef* WIN32PTR mode_array;
 
-        options = CFDictionaryCreate(NULL, (const void**)&kCGDisplayShowDuplicateLowResolutionModes,
-                                     (const void**)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
+        options = CFDictionaryCreate(NULL, (const void* HOSTPTR * HOSTPTR)&kCGDisplayShowDuplicateLowResolutionModes,
+                                     (const void* HOSTPTR * HOSTPTR)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
                                      &kCFTypeDictionaryValueCallBacks);
 
         modes = CGDisplayCopyAllDisplayModes(display, options);
@@ -716,8 +716,8 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
 
         count = CFDictionaryGetCount(modes_by_size);
         mode_array = HeapAlloc(GetProcessHeap(), 0, count * sizeof(mode_array[0]));
-        CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void **)mode_array);
-        modes = CFArrayCreate(NULL, (const void **)mode_array, count, &kCFTypeArrayCallBacks);
+        CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void * HOSTPTR * HOSTPTR)mode_array);
+        modes = CFArrayCreate(NULL, (const void * HOSTPTR * HOSTPTR)mode_array, count, &kCFTypeArrayCallBacks);
         HeapFree(GetProcessHeap(), 0, mode_array);
         CFRelease(modes_by_size);
     }
@@ -1171,7 +1171,7 @@ BOOL CDECL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
     int num_displays;
     uint32_t mac_entries;
     int win_entries = ARRAY_SIZE(r->red);
-    CGGammaValue *red, *green, *blue;
+    CGGammaValue * WIN32PTR red, * WIN32PTR green, * WIN32PTR blue;
     CGError err;
     int win_entry;
 
@@ -1253,7 +1253,7 @@ BOOL CDECL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
     struct macdrv_display *displays;
     int num_displays;
     int win_entries = ARRAY_SIZE(r->red);
-    CGGammaValue *red, *green, *blue;
+    CGGammaValue * WIN32PTR red, * WIN32PTR green, * WIN32PTR blue;
     int i;
     CGError err = kCGErrorFailure;
 
@@ -1439,6 +1439,7 @@ static BOOL macdrv_init_adapter(HKEY video_hkey, int video_index, int gpu_index,
     BOOL ret = FALSE;
     LSTATUS ls;
     INT i;
+    DWORD temp;
 
     sprintfW(key_nameW, device_video_fmtW, video_index);
     lstrcpyW(bufferW, machine_prefixW);
@@ -1483,8 +1484,9 @@ static BOOL macdrv_init_adapter(HKEY video_hkey, int video_index, int gpu_index,
     }
 
     /* Write StateFlags */
-    if (RegSetValueExW(hkey, state_flagsW, 0, REG_DWORD, (const BYTE *)&adapter->state_flags,
-                       sizeof(adapter->state_flags)))
+    temp = adapter->state_flags;
+    if (RegSetValueExW(hkey, state_flagsW, 0, REG_DWORD, (const BYTE *)&temp,
+                       sizeof(temp)))
         goto done;
 
     ret = TRUE;
@@ -1511,6 +1513,7 @@ static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *m
     HKEY hkey;
     RECT rect;
     BOOL ret = FALSE;
+    DWORD temp;
 
     /* Create GUID_DEVCLASS_MONITOR instance */
     sprintfW(bufferW, monitor_instance_fmtW, video_index, monitor_index);
@@ -1531,8 +1534,9 @@ static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *m
     /* FIXME:
      * Following properties are Wine specific, see comments in macdrv_init_adapter for details */
     /* StateFlags */
+    temp = monitor->state_flags;
     if (!SetupDiSetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_STATEFLAGS, DEVPROP_TYPE_UINT32,
-                                   (const BYTE *)&monitor->state_flags, sizeof(monitor->state_flags), 0))
+                                   (const BYTE *)&temp, sizeof(temp), 0))
         goto done;
     /* RcMonitor */
     rect = rect_from_cgrect(monitor->rc_monitor);
@@ -1658,6 +1662,8 @@ void macdrv_init_display_devices(BOOL force)
     if (macdrv_get_gpus(&gpus, &gpu_count))
         goto done;
     TRACE("GPU count: %d\n", gpu_count);
+    if (!gpu_count)
+        ERR("No GPUs detected\n");
 
     for (gpu = 0; gpu < gpu_count; gpu++)
     {

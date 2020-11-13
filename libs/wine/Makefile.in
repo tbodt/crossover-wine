@@ -1,5 +1,5 @@
-EXTRALIBS = $(DL_LIBS) $(COREFOUNDATION_LIBS) $(CORESERVICES_LIBS) $(I386_LIBS)
-
+# CrossOver Hack 13438: Don't link against CoreFoundation or CoreServices
+EXTRALIBS = $(DL_LIBS) $(I386_LIBS)
 
 C_SRCS = \
 	config.c \
@@ -22,7 +22,9 @@ config_EXTRADEFS = \
 SHAREDLIB = $(LIBWINE_SHAREDLIB)
 
 libwine_LDFLAGS = $(LIBWINE_LDFLAGS)
+libwine32on64_LDFLAGS = $(LIBWINE_LDFLAGS)
 libwine_DEPS = $(LIBWINE_DEPENDS)
+libwine32on64_DEPS = $(LIBWINE_DEPENDS)
 
 version.c: dummy
 	version=`(GIT_DIR=$(top_srcdir)/.git git describe HEAD 2>/dev/null || echo "wine-$(PACKAGE_VERSION)") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || (rm -f $@ && exit 1)

@@ -343,7 +343,7 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
     case ENCODING_ANSI:
         TRACE("ANSI encoding\n");
 
-        len = MultiByteToWideChar(CP_ACP, 0, pBuffer, dwFileSize, NULL, 0);
+        len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pBuffer, dwFileSize, NULL, 0);
         szFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
         if (!szFile)
         {
@@ -356,7 +356,7 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
     case ENCODING_UTF8:
         TRACE("UTF8 encoding\n");
 
-        len = MultiByteToWideChar(CP_UTF8, 0, pBuffer, dwFileSize, NULL, 0);
+        len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)pBuffer, dwFileSize, NULL, 0);
         szFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
         if (!szFile)
         {

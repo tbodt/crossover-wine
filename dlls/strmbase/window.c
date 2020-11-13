@@ -667,7 +667,7 @@ HRESULT WINAPI BaseControlWindowImpl_NotifyOwnerMessage(IVideoWindow *iface,
     BaseControlWindow *window = impl_from_IVideoWindow(iface);
 
     TRACE("window %p, hwnd %#lx, message %#x, wparam %#lx, lparam %#lx.\n",
-            window, hwnd, message, wparam, lparam);
+            window, (long)hwnd, message, (long)wparam, (long)lparam);
 
     /* That these messages are forwarded, and no others, is stated by the
      * DirectX documentation, and supported by manual testing. */

@@ -30,6 +30,7 @@
 #include "wtypes.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -39,6 +40,14 @@ static BOOL n_format_enabled = TRUE;
 #define PRINTF_WIDE
 #include "printf.h"
 #undef PRINTF_WIDE
+#ifdef __i386_on_x86_64__
+#define PRINTF_HOSTPTR
+#include "printf.h"
+#define PRINTF_WIDE
+#include "printf.h"
+#undef PRINTF_WIDE
+#undef PRINTF_HOSTPTR
+#endif
 
 #if _MSVCR_VER>=80
 
@@ -693,6 +702,23 @@ int CDECL MSVCRT_vsnprintf( char *str, MSVCRT_size_t len,
     puts_clbk_str_a(&ctx, 1, &nullbyte);
     return ret;
 }
+
+#ifdef __i386_on_x86_64__
+int CDECL MSVCRT_vsnprintf( char * HOSTPTR str, MSVCRT_size_t len,
+                            const char * HOSTPTR format, __ms_va_list valist ) __attribute__((overloadable)) asm(__ASM_NAME("MSVCRT_vsnprintf_HOSTPTR"));
+int CDECL MSVCRT_vsnprintf( char * HOSTPTR str, MSVCRT_size_t len,
+                            const char * HOSTPTR format, __ms_va_list valist ) __attribute__((overloadable))
+{
+    static const char nullbyte = '\0';
+    struct _str_ctx_a_HOSTPTR ctx = {len, str};
+    int ret;
+
+    ret = pf_printf_a_HOSTPTR(puts_clbk_str_a_HOSTPTR, &ctx, format, NULL, 0,
+            arg_clbk_valist, NULL, &valist);
+    puts_clbk_str_a_HOSTPTR(&ctx, 1, &nullbyte);
+    return ret;
+}
+#endif
 
 #if _MSVCR_VER>=140
 
@@ -1638,8 +1664,24 @@ MSVCRT_wchar_t * CDECL MSVCRT_wcstok( MSVCRT_wchar_t *str, const MSVCRT_wchar_t 
 /*********************************************************************
  *		_wctomb_s_l (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
+int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale);
+static int CDECL MSVCRT__wctomb_s_l(int *len, char * HOSTPTR mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale) __attribute__((overloadable));
+
 int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
         MSVCRT_wchar_t wch, MSVCRT__locale_t locale)
+{
+    return MSVCRT__wctomb_s_l(len, (char * HOSTPTR)mbchar, size, wch, locale);
+}
+
+static int CDECL MSVCRT__wctomb_s_l(int *len, char * HOSTPTR mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale) __attribute__((overloadable))
+#else
+int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale)
+#endif
 {
     MSVCRT_pthreadlocinfo locinfo;
     BOOL error;
@@ -1709,7 +1751,16 @@ int CDECL MSVCRT_wctomb_s(int *len, char *mbchar, MSVCRT_size_t size, MSVCRT_wch
 /*********************************************************************
  *              _wctomb_l (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 int CDECL MSVCRT__wctomb_l(char *dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale)
+{
+    return MSVCRT__wctomb_l((char * HOSTPTR)dst, ch, locale);
+}
+
+int CDECL MSVCRT__wctomb_l(char * HOSTPTR dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale) __attribute__((overloadable))
+#else
+int CDECL MSVCRT__wctomb_l(char *dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale)
+#endif
 {
     int len;
 
@@ -2433,7 +2484,16 @@ MSVCRT_ulong __cdecl MSVCRT_wcstoul(const MSVCRT_wchar_t *s, MSVCRT_wchar_t **en
 /******************************************************************
  *  wcsnlen (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t *s, MSVCRT_size_t maxlen)
+{
+    return MSVCRT_wcsnlen((const MSVCRT_wchar_t * HOSTPTR)s, maxlen);
+}
+
+MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t * HOSTPTR s, MSVCRT_size_t maxlen) __attribute__((overloadable))
+#else
+MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t *s, MSVCRT_size_t maxlen)
+#endif
 {
     MSVCRT_size_t i;
 
